@@ -1,0 +1,75 @@
+{
+  "name": "tessera-cli",
+  "version": "0.0.0",
+  "description": "Client-side script inventory and change detection for web pages. A lockfile for everything that executes in the browser.",
+  "keywords": [
+    "script-inventory",
+    "change-detection",
+    "client-side-security",
+    "magecart",
+    "e-skimming",
+    "pci-dss",
+    "6.4.3",
+    "11.6.1",
+    "playwright",
+    "cdp",
+    "csp",
+    "security-headers",
+    "third-party-scripts"
+  ],
+  "license": "MIT",
+  "author": "Vladimir Nizovtsev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vladimirnizovtsev/tessera.git"
+  },
+  "bugs": "https://github.com/vladimirnizovtsev/tessera/issues",
+  "homepage": "https://github.com/vladimirnizovtsev/tessera#readme",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "tessera": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "action.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "vitest run --project e2e",
+    "prepublishOnly": "npm run typecheck && npm run build && npm test"
+  },
+  "dependencies": {
+    "commander": "^15.0.0",
+    "picocolors": "^1.1.1",
+    "picomatch": "^4.0.7",
+    "playwright-core": "^1.62.1",
+    "third-party-web": "^0.29.2",
+    "yaml": "^2.9.0",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "@types/picomatch": "^4.0.2",
+    "tsup": "^8.5.1",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  }
+}
