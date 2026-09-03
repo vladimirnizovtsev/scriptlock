@@ -47,7 +47,7 @@ jobs:
       # Pin to a release tag or, better, a full commit SHA for supply chain hygiene.
       - name: Scriptlock
         id: scriptlock
-        uses: vladimirnizovtsev/scriptlock@v0.2.1
+        uses: vladimirnizovtsev/scriptlock@v0.3.0
         env:
           # The "preview" profile in scriptlock.config.yaml has `url: ${PREVIEW_URL}` and
           # `manifest: scriptlock.lock.yaml`, so the preview is checked against the same
@@ -58,7 +58,7 @@ jobs:
         with:
           profile: preview
           mode: gate
-          version: "0.2.1"
+          version: "0.3.0"
 
       - name: Comment on the pull request
         # always(), so a failing gate still comments; the fork check, because a fork pull

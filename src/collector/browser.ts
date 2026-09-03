@@ -15,6 +15,7 @@
  */
 import { chromium, type Browser, type LaunchOptions } from 'playwright-core';
 import { ScriptlockError } from '../errors.js';
+import { scriptlockCommand } from '../runner.js';
 import type { BrowserConfig } from '../types.js';
 
 export interface LaunchedBrowser {
@@ -25,9 +26,16 @@ export interface LaunchedBrowser {
   distribution: string;
 }
 
-const INSTALL_HINT =
-  'Install it with the package manager this project uses: npx playwright-core install chromium, ' +
-  'pnpm exec playwright-core install chromium, or yarn playwright-core install chromium';
+/**
+ * One command, correct under every package manager. It is deliberately not
+ * `playwright-core install chromium`: playwright-core is a transitive
+ * dependency of scriptlock, and pnpm and Yarn Berry link no bin for a
+ * transitive dependency, so that command does not exist in either. The
+ * subcommand runs the bundled playwright-core by resolved path instead.
+ */
+export function installHint(env?: Record<string, string | undefined>, cwd?: string): string {
+  return `Install it with "${scriptlockCommand('install-browser', env, cwd)}"`;
+}
 const CHANNEL_HINT = 'Install that browser on this machine, or set browser.channel to chromium, chrome or msedge (or browser.executablePath to a Chromium-based binary)';
 
 function executablePathHint(executablePath: string): string {
@@ -64,7 +72,7 @@ export async function launchBrowser(cfg: BrowserConfig): Promise<LaunchedBrowser
     return { browser, channel, distribution: cfg.headless ? 'headless-shell' : 'chromium' };
   } catch (error) {
     if (!looksLikeMissingBrowser(error)) throw error;
-    const browser = await tryLaunch({ ...base, channel: 'chromium' }, channel, INSTALL_HINT, error);
+    const browser = await tryLaunch({ ...base, channel: 'chromium' }, channel, installHint(), error);
     return { browser, channel, distribution: 'chromium' };
   }
 }

@@ -10,7 +10,7 @@ Requirements: Node 22 or later, npm, and a machine that can run Chromium.
 git clone https://github.com/vladimirnizovtsev/scriptlock.git
 cd scriptlock
 npm ci
-npx playwright-core install chromium     # on Linux CI add --with-deps
+npm run dev -- install-browser            # on Linux add --with-deps
 ```
 
 Useful commands:
@@ -71,19 +71,19 @@ Pull requests with unsigned commits will be asked to rebase with `git rebase --s
 
 Releasing the GitHub Action is a git tag, not an npm publish. The runner reads `action.yml` from the ref in `uses:` and never from the npm tarball, so a release that only bumps the npm version leaves every action consumer on the old `action.yml` — which is exactly how the 0.1.0 artifact defect would have survived 0.2.0.
 
-1. Update `CHANGELOG.md`, `package.json`, the `version` input default in `action.yml` and the `uses:` and `version:` lines in `README.md` and `examples/workflows/`. `test/unit/action.test.ts` fails when the `version` default and `package.json` disagree.
-2. `npm run typecheck && npm test && npm run build && npm pack --dry-run`.
+1. Update `CHANGELOG.md`, `package.json`, the `version` input default in `action.yml` and the `uses:` and `version:` lines in `README.md` and `examples/workflows/`. `test/unit/action.test.ts` fails when any of those disagree with `package.json`, `README.md` included.
+2. `npm run typecheck && npm test && npm run build && npm pack --dry-run`. When the release touches an install instruction, also run the install matrix that CI runs (`.github/workflows/ci.yml`, job `install`): it packs the tarball and follows the README's own commands under npm, pnpm, Yarn Classic and Yarn Berry. 0.2.1 and the first draft of 0.2.2 both shipped an install command that had never been run.
 3. Tag the exact version and push it, then publish a GitHub release for that tag:
 
    ```sh
-   git tag -a v0.2.1 -m "v0.2.1" && git push origin v0.2.1
+   git tag -a v0.3.0 -m "v0.3.0" && git push origin v0.3.0
    ```
 
 4. Advance the moving tags, so a workflow that pinned a tag rather than a SHA can receive the fix at all. `v0.1` tracks the latest patch of the 0.1 line and `v0` tracks the latest 0.x release; before 1.0 a minor may break, so say so in the changelog when `v0` crosses one.
 
    ```sh
-   git tag -f v0.2 v0.2.1 && git push -f origin v0.2
-   git tag -f v0   v0.2.1 && git push -f origin v0
+   git tag -f v0.3 v0.3.0 && git push -f origin v0.2
+   git tag -f v0   v0.3.0 && git push -f origin v0
    ```
 
 5. `npm publish` for the CLI. When the release is action-only, say so in the changelog entry: users must change their `uses:` ref, and bumping the `version:` input changes nothing.

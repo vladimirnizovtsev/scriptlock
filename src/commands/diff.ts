@@ -23,6 +23,7 @@ import { readManifest } from '../manifest/io.js';
 import { renderJson } from '../report/json.js';
 import { renderMarkdown } from '../report/markdown.js';
 import { exitCodeMeaning, renderText } from '../report/text.js';
+import { scriptlockCommand } from '../runner.js';
 import type { DiffMode, DiffResult, Manifest, ScanOptions, Snapshot } from '../types.js';
 import { lastSnapshotPath, loadProfile, plural, readSnapshot, writeSnapshot, type CommandContext } from './scan.js';
 
@@ -90,13 +91,19 @@ function summaryLine(result: DiffResult): string {
   return `${fail} fail, ${warn} warn, ${info} info; exit code ${result.exitCode} (${exitCodeMeaning(result.exitCode)})`;
 }
 
-export function missingManifestInstructions(profile: string, manifestPath: string, snapshot: Snapshot, snapshotPath: string): string {
+export function missingManifestInstructions(
+  profile: string,
+  manifestPath: string,
+  snapshot: Snapshot,
+  snapshotPath: string,
+  runner: string = 'scriptlock',
+): string {
   const scripts = snapshot.scripts.filter((s) => s.scope !== 'harness').length;
   return [
     `error: no manifest found for profile "${profile}" (expected ${manifestPath})`,
     `The snapshot with ${plural(scripts, 'script')} is at ${snapshotPath}. Review it, then create the manifest from it:`,
-    `  scriptlock approve --all-new --profile ${profile} --owner "<team>" --category "<category>" --justification "<why these scripts belong on the page>"`,
-    'Commit the manifest next to scriptlock.config.yaml and run "scriptlock diff" again.',
+    `  ${runner} approve --all-new --profile ${profile} --owner "<team>" --category "<category>" --justification "<why these scripts belong on the page>"`,
+    `Commit the manifest next to scriptlock.config.yaml and run "${runner} diff" again.`,
   ].join('\n');
 }
 
@@ -104,6 +111,10 @@ export async function runDiff(ctx: CommandContext, opts: DiffCommandOptions): Pr
   const loaded = await loadProfile(ctx, opts.profile);
   const format = opts.format ?? 'text';
   const manifestPath = manifestPathFor(opts.profile, loaded.profile, ctx.cwd);
+  // Every command this run prints has to be runnable as typed: scriptlock is a
+  // development dependency, so it is `npx scriptlock`, `pnpm exec scriptlock`
+  // or `yarn scriptlock` and never a bare `scriptlock`.
+  const runner = scriptlockCommand('', ctx.env, ctx.cwd);
 
   let snapshot: Snapshot;
   let snapshotPath: string;
@@ -145,13 +156,13 @@ export async function runDiff(ctx: CommandContext, opts: DiffCommandOptions): Pr
     manifest = await readManifest(manifestPath);
   } catch (error) {
     if (!isScriptlockError(error) || error.code !== 'MANIFEST_NOT_FOUND') throw error;
-    ctx.err(missingManifestInstructions(opts.profile, manifestPath, snapshot, snapshotPath));
+    ctx.err(missingManifestInstructions(opts.profile, manifestPath, snapshot, snapshotPath, runner));
     return { exitCode: 1, snapshot, snapshotPath, manifestPath, report: '' };
   }
 
   // Hints are printed as ready-to-paste commands, so they must name the same
   // profile and configuration file this run used.
-  const hintContext: HintContext = { profile: opts.profile };
+  const hintContext: HintContext = { profile: opts.profile, runner };
   if (ctx.configPath !== undefined) hintContext.config = ctx.configPath;
   const result = diff({ snapshot, manifest, mode: opts.mode, identity: loaded.config.identity, hintContext });
   for (const warning of result.warnings ?? []) ctx.err(`warning: ${warning}`);

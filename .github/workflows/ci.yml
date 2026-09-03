@@ -49,3 +49,109 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # Installs the packed tarball the way each README block tells a reader to, then runs
+  # the walkthrough. Nothing else in this repository installs scriptlock as a consumer,
+  # which is how 0.2.1 shipped an npm-only install section and how the first draft of
+  # 0.2.2 shipped a `pnpm exec playwright-core install chromium` that cannot run: pnpm and
+  # Yarn Berry link no binary for a transitive dependency, and playwright-core is one.
+  #
+  # The commands below are written out per manager rather than assembled from matrix
+  # variables: a command that only works because the shell word-splits a variable is
+  # exactly the kind of untested instruction this job exists to catch.
+  install:
+    name: Install as documented (${{ matrix.manager }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        manager: [npm, pnpm, yarn-classic, yarn-berry]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Pack the tarball a reader would install
+        run: |
+          npm ci
+          npm run build
+          npm pack --pack-destination "$RUNNER_TEMP"
+
+      - name: Install it the way the README says
+        env:
+          MANAGER: ${{ matrix.manager }}
+        run: |
+          set -euo pipefail
+          tgz="$(ls "$RUNNER_TEMP"/scriptlock-*.tgz)"
+          mkdir -p "$RUNNER_TEMP/consumer"
+          cd "$RUNNER_TEMP/consumer"
+          case "$MANAGER" in
+            npm)
+              echo '{"name":"consumer","private":true,"version":"1.0.0"}' > package.json
+              npm install --save-dev "$tgz"
+              ;;
+            pnpm)
+              echo '{"name":"consumer","private":true,"version":"1.0.0","packageManager":"pnpm@10.15.0"}' > package.json
+              corepack enable
+              pnpm add -D "$tgz"
+              ;;
+            yarn-classic)
+              echo '{"name":"consumer","private":true,"version":"1.0.0","packageManager":"yarn@1.22.22"}' > package.json
+              corepack enable
+              yarn add -D "file:$tgz"
+              ;;
+            yarn-berry)
+              echo '{"name":"consumer","private":true,"version":"1.0.0","packageManager":"yarn@4.10.3"}' > package.json
+              corepack enable
+              # Berry refuses to treat a directory as its own project without one.
+              : > yarn.lock
+              yarn add -D "$tgz"
+              ;;
+          esac
+
+      - name: Run the walkthrough with that manager's runner
+        env:
+          MANAGER: ${{ matrix.manager }}
+        working-directory: ${{ runner.temp }}/consumer
+        run: |
+          set -euo pipefail
+          # A page to scan, so the browser is proved launchable and not merely downloaded.
+          node -e 'require("http").createServer((_q,s)=>{s.setHeader("content-type","text/html");s.end("<!doctype html><html><body><script>window.ok=1</script></body></html>")}).listen(8099,"127.0.0.1")' &
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:8099/ >/dev/null && break; sleep 1; done
+
+          walkthrough() {
+            # "$@" is the runner: npx / pnpm exec / yarn.
+            "$@" scriptlock --version
+            "$@" scriptlock install-browser --with-deps
+            "$@" scriptlock init --url http://127.0.0.1:8099/
+            "$@" scriptlock scan
+            "$@" scriptlock approve --all-new --owner ci --category functional \
+              --justification "Install matrix: the page served by this job"
+            "$@" scriptlock diff --gate
+          }
+          case "$MANAGER" in
+            npm) walkthrough npx ;;
+            pnpm) walkthrough pnpm exec ;;
+            yarn-classic|yarn-berry) walkthrough yarn ;;
+          esac
+
+          # The version has to be the one just installed, not a registry copy npx
+          # silently fetched because it found no local install.
+          case "$MANAGER" in
+            npm) installed="$(npx scriptlock --version)" ;;
+            pnpm) installed="$(pnpm exec scriptlock --version)" ;;
+            *) installed="$(yarn scriptlock --version | tail -n 1)" ;;
+          esac
+          expected="$(node -p "require('${{ github.workspace }}/package.json').version")"
+          test "$installed" = "$expected" || {
+            echo "ran scriptlock $installed, expected $expected" >&2
+            exit 1
+          }

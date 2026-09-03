@@ -55,6 +55,12 @@ export interface HintContext {
   profile?: string | undefined;
   /** `--config <path>` of this run; undefined prints no `--config`. */
   config?: string | undefined;
+  /**
+   * How `scriptlock` is typed in this project, e.g. `npx scriptlock` or
+   * `pnpm exec scriptlock`. Defaults to the bare name, which is what a global
+   * install and a library caller want; the CLI passes the detected runner.
+   */
+  runner?: string | undefined;
 }
 
 /** Optional extras accepted on top of DiffOptions, mainly for tests. */
@@ -148,6 +154,7 @@ export function bundlePath(id: string): { directory: string; extension: string; 
  * another profile's manifest.
  */
 export function bundleHints(events: readonly DiffEvent[], context: HintContext = {}): string[] {
+  const scriptlock = context.runner === undefined || context.runner === '' ? 'scriptlock' : context.runner;
   const target = [
     ...(context.profile !== undefined && context.profile !== '' && context.profile !== 'default' ? [`--profile "${context.profile}"`] : []),
     ...(context.config !== undefined && context.config !== '' ? [`--config "${context.config}"`] : []),
@@ -180,7 +187,7 @@ export function bundleHints(events: readonly DiffEvent[], context: HintContext =
     directories.add(group.directory);
     hints.push(
       `${group.stems.size} new scripts under ${group.directory}/ differ only in their file name, which is the content-hashed bundle pattern: every build renames them, so every deploy reports them as new. One entry can authorise that one directory, not its subdirectories, at the price of hashing none of their bodies:\n` +
-        `scriptlock approve --match "${glob}"${targetFlags} --owner "<team>" --category framework --justification "<why this build directory is authorised>"`,
+        `${scriptlock} approve --match "${glob}"${targetFlags} --owner "<team>" --category framework --justification "<why this build directory is authorised>"`,
     );
   }
   return hints;

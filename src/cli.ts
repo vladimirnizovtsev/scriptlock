@@ -19,6 +19,7 @@ import { isScriptlockError } from './errors.js';
 import { APPROVABLE_SCOPES, INTEGRITY_METHODS, INTEGRITY_POLICIES, runApprove, SCRIPT_CATEGORIES } from './commands/approve.js';
 import { DIFF_FORMATS, runDiff, type DiffFormat } from './commands/diff.js';
 import { runInit } from './commands/init.js';
+import { runInstallBrowser } from './commands/install-browser.js';
 import { REPORT_FORMATS, runReport, type ReportFormat } from './commands/report.js';
 import { DEFAULT_PROFILE_URL } from './config/schema.js';
 import { runScan, type CommandContext } from './commands/scan.js';
@@ -128,6 +129,15 @@ export function buildProgram(state: CliState, io: CliIo, version: string = packa
       // them to edit a URL they have just given.
       const fromFlag = this.getOptionValueSource('url') === 'cli';
       await runInit(context(), { ...(fromFlag ? { url: options.url } : {}), force: options.force === true });
+    });
+
+  program
+    .command('install-browser')
+    .description('install the Chromium build this scriptlock drives, with its own bundled playwright-core')
+    .argument('[browsers...]', 'browsers to install (default: chromium)')
+    .option('--with-deps', 'also install the operating system libraries the browser needs (Linux only, needs root)')
+    .action(async (browsers: string[], options: { withDeps?: boolean }) => {
+      await runInstallBrowser(context(), { browsers, withDeps: options.withDeps === true });
     });
 
   program

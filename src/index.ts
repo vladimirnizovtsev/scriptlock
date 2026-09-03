@@ -145,3 +145,21 @@ export {
   type ReportFormat,
 } from './commands/report.js';
 export { runInit, configTemplate, type InitCommandOptions, type InitCommandResult } from './commands/init.js';
+export {
+  runInstallBrowser,
+  installArgs,
+  playwrightCliPath,
+  DEFAULT_BROWSERS,
+  type InstallBrowserOptions,
+  type InstallBrowserResult,
+} from './commands/install-browser.js';
+
+// package-manager detection for the commands the CLI prints
+export {
+  detectPackageManager,
+  runnerPrefix,
+  scriptlockCommand,
+  addDevDependencyCommand,
+  RUNNERS,
+  type PackageManager,
+} from './runner.js';

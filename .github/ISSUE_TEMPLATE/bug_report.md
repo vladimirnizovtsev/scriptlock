@@ -21,6 +21,8 @@ npx scriptlock scan --profile default
 npx scriptlock diff --gate
 ```
 
+(Use the runner your project uses: `npx`, `pnpm exec` or `yarn`.)
+
 ## Output
 
 Paste the relevant terminal output. Run with `--verbose` for more detail. Redact hostnames, tokens and anything else you do not want public.
@@ -30,7 +32,8 @@ Paste the relevant terminal output. Run with `--verbose` for more detail. Redact
 
 ## Environment
 
-- scriptlock version (`npx scriptlock --version`):
+- scriptlock version, asked the way your own package manager runs it — `npx scriptlock --version`, `pnpm exec scriptlock --version` or `yarn scriptlock --version` — plus the `scriptlock` line from your `package.json`. In a project with no `node_modules` (Yarn Berry's PnP, or an install that failed), `npx` reports a copy it fetched from the registry rather than the one you have:
+- Package manager and version (`npm -v`, `pnpm -v` or `yarn -v`):
 - Node version (`node --version`):
 - Operating system:
 - Browser channel or executablePath from scriptlock.config.yaml:

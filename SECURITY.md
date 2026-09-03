@@ -6,7 +6,7 @@ Please report vulnerabilities in Scriptlock privately through GitHub security ad
 
 https://github.com/vladimirnizovtsev/scriptlock/security/advisories/new
 
-Do not open a public issue or pull request for a vulnerability. Include the version (`npx scriptlock --version`), a minimal reproduction and the impact you see. You will get an acknowledgement within seven days and a fix or a written assessment as soon as reasonably possible; the advisory is published together with the fixed release. There is no bug bounty. Credit is given in the advisory and the changelog unless you ask otherwise.
+Do not open a public issue or pull request for a vulnerability. Include the version — asked the way your own package manager runs it (`npx scriptlock --version`, `pnpm exec scriptlock --version` or `yarn scriptlock --version`), together with the `scriptlock` line from your `package.json`, because `npx` reports a registry copy when a project has no `node_modules` — a minimal reproduction and the impact you see. You will get an acknowledgement within seven days and a fix or a written assessment as soon as reasonably possible; the advisory is published together with the fixed release. There is no bug bounty. Credit is given in the advisory and the changelog unless you ask otherwise.
 
 ## Scope
 

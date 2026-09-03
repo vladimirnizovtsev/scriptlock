@@ -121,6 +121,29 @@ describe('action.yml', () => {
     expect(action.inputs?.['version']?.default).toBe(packageVersion);
   });
 
+  it('installs Chromium through the CLI rather than a hard-coded npm global path', () => {
+    const chromium = steps.find((step) => step.name?.includes('Chromium') === true);
+    expect(chromium, 'the Chromium install step').toBeDefined();
+    const run = chromium?.run ?? '';
+    expect(run).toContain('scriptlock install-browser');
+    // `$(npm root -g)/scriptlock/node_modules/playwright-core/cli.js` encoded the
+    // layout of npm's global tree into this file. The same PATH assumption is what
+    // made the documented pnpm and yarn install commands unrunnable.
+    expect(run).not.toContain('npm root -g');
+    expect(run).not.toMatch(/\bplaywright-core\b/);
+  });
+
+  it('checks the Node version in the install step, before anything can crash on it', () => {
+    // `scriptlock --version` on an old `node-version` prints "scriptlock requires
+    // Node 22 or later" and stops the job there. Moving it after the Chromium step,
+    // or into its own step, turns that into an unexplained failure instead.
+    const installIndex = steps.findIndex((step) => step.run?.includes('npm install -g') === true);
+    const chromiumIndex = steps.findIndex((step) => step.name?.includes('Chromium') === true);
+    expect(installIndex).toBeGreaterThanOrEqual(0);
+    expect(chromiumIndex).toBeGreaterThan(installIndex);
+    expect(steps[installIndex]?.run ?? '').toContain('scriptlock --version');
+  });
+
   it('pins every action it uses to a full commit SHA with the version in a comment', () => {
     const refs = usesLines(actionText);
     expect(refs.length).toBeGreaterThan(0);
@@ -156,11 +179,43 @@ describe('workflow files', () => {
     });
   }
 
+  it('installs the package the way the README tells a reader to', () => {
+    // Every install instruction in the README was an untested claim until this job
+    // existed: 0.2.1 shipped an npm-only section, and the first draft of this release shipped a
+    // pnpm command that cannot run. Both were green.
+    const ci = readFileSync(join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8');
+    const parsed = parse(ci) as { jobs?: Record<string, { strategy?: { matrix?: Record<string, unknown> } }> };
+    const install = parsed.jobs?.['install'];
+    expect(install, 'ci.yml needs an install-matrix job').toBeDefined();
+    expect(install?.strategy?.matrix?.['manager']).toEqual(['npm', 'pnpm', 'yarn-classic', 'yarn-berry']);
+    expect(ci).toContain('npm pack');
+    expect(ci).toContain('scriptlock install-browser');
+  });
+
   it('checks out without leaving the job token in .git/config', () => {
     for (const file of files) {
       const text = readFileSync(file, 'utf8');
       if (!text.includes('actions/checkout@')) continue;
       expect(text, `${file}: actions/checkout needs persist-credentials: false`).toContain('persist-credentials: false');
     }
+  });
+});
+
+
+describe('README', () => {
+  const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8');
+
+  it('references this release of the action, not an older tag', () => {
+    // action.yml and the example workflows were already guarded; the README's own
+    // copy-paste blocks were not, so a stale ref there would ship silently.
+    const refs = usesLines(readme).filter(({ ref }) => ref.startsWith('vladimirnizovtsev/scriptlock@'));
+    expect(refs.length, 'the README shows the action in at least one workflow').toBeGreaterThan(0);
+    for (const { ref } of refs) expect(ref).toBe(`vladimirnizovtsev/scriptlock@v${packageVersion}`);
+  });
+
+  it('pins the npm version input to this release', () => {
+    const versions = [...readme.matchAll(/^\s*version:\s*"([0-9]+\.[0-9]+\.[0-9]+)"/gm)].map((m) => m[1]);
+    expect(versions.length, 'the README shows the version input').toBeGreaterThan(0);
+    for (const version of versions) expect(version).toBe(packageVersion);
   });
 });

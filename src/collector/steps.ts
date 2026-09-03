@@ -19,6 +19,7 @@ import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { Page } from 'playwright-core';
 import { ScriptlockError } from '../errors.js';
+import { addDevDependencyCommand } from '../runner.js';
 import type { FlowStep, WaitUntil } from '../types.js';
 
 export interface StepContext {
@@ -154,9 +155,12 @@ async function importWithTsx(href: string, modulePath: string): Promise<unknown>
     const specifier = 'tsx/esm/api';
     api = (await import(specifier)) as TsxApi;
   } catch (error) {
+    // tsx has to be a direct dependency of the project that runs scriptlock:
+    // it is resolved from the working directory upwards, and pnpm and Yarn
+    // Berry expose nothing that is not declared in the project's package.json.
     throw new ScriptlockError('UNSUPPORTED', `flow module ${modulePath} is TypeScript but tsx is not installed`, {
       exitCode: 2,
-      hint: 'npm install --save-dev tsx',
+      hint: `${addDevDependencyCommand('tsx')} (a direct dependency of this project, not a transitive one)`,
       cause: error,
     });
   }

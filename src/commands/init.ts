@@ -16,6 +16,7 @@ import path from 'node:path';
 import { CONFIG_FILE_NAMES, parseConfig } from '../config/load.js';
 import { DEFAULT_PROFILE_URL, DEFAULT_SETTLE_MS, DEFAULT_TIMEOUT_MS, DEFAULT_VIEWPORT } from '../config/schema.js';
 import { ScriptlockError } from '../errors.js';
+import { scriptlockCommand } from '../runner.js';
 import type { CommandContext } from './scan.js';
 
 export interface InitCommandOptions {
@@ -51,8 +52,8 @@ version: 1
 
 browser:
   # Playwright channel: "chromium" (the Playwright-managed build, installed with
-  # \`npx playwright-core install chromium\`, or the pnpm or yarn equivalent), "chrome" or
-  # "msedge". Or set executablePath to a Chromium-based binary; it overrides channel.
+  # \`scriptlock install-browser\`), "chrome" or "msedge". Or set executablePath to a
+  # Chromium-based binary; it overrides channel.
   channel: chromium
   headless: true
   viewport: { width: ${DEFAULT_VIEWPORT.width}, height: ${DEFAULT_VIEWPORT.height} }
@@ -170,14 +171,18 @@ export async function runInit(ctx: CommandContext, opts: InitCommandOptions = {}
   if (gitignore === 'missing') {
     steps.push([`Add ${IGNORE_LINE} to your .gitignore: what lands there is scan output, not evidence to commit.`]);
   }
-  steps.push(['scriptlock scan                 record every script and header of the page']);
+  // Prefixed with the runner of the detected package manager: scriptlock is a
+  // development dependency, so a bare `scriptlock scan` is `command not found`
+  // under npm, pnpm and yarn alike.
+  const run = (args: string): string => scriptlockCommand(args, ctx.env, ctx.cwd);
+  steps.push([`${run('scan')} — record every script and header of the page`]);
   // A concrete owner and justification: the placeholder guard refuses "<team>"
   // and "<why ...>", so a printed command has to be one that actually runs.
   steps.push([
-    'scriptlock approve --all-new --owner web --category functional --justification "Initial inventory of the checkout page, reviewed in PR #123"',
+    run('approve --all-new --owner web --category functional --justification "Initial inventory of the checkout page, reviewed in PR #123"'),
     'replace the owner, category and justification with your own: they are the 6.4.3 record',
   ]);
-  steps.push(['scriptlock diff --gate          compare a fresh scan with the manifest; exit 0 clean, 1 findings, 2 run error']);
+  steps.push([`${run('diff --gate')} — compare a fresh scan with the manifest; exit 0 clean, 1 findings, 2 run error`]);
   steps.forEach(([step, note], index) => {
     lines.push(`  ${index + 1}. ${step ?? ''}`);
     if (note !== undefined) lines.push(`     ${note}`);

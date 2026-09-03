@@ -65,7 +65,7 @@ inputs:
       produced by the same code; "latest" is accepted but is not reproducible, and the value
       is an npm spec, so a git URL or a tarball URL here installs arbitrary code.
     required: false
-    default: "0.2.1"
+    default: "0.3.0"
   history:
     description: >-
       Also write the snapshot and diff under .scriptlock/history/<profile>/ (true or false).
@@ -200,14 +200,21 @@ runs:
       # Chromium explicitly), and the install runs in a job that may hold secrets.
       run: |
         npm install -g --ignore-scripts "scriptlock@$SCRIPTLOCK_VERSION"
-        # Records in the log which version produced the evidence below.
+        # Records in the log which version produced the evidence below. Keep this line in
+        # THIS step and ahead of the Chromium step: it is what turns a `node-version` older
+        # than the CLI's minimum into "scriptlock requires Node 22 or later" instead of an
+        # unexplained crash from whatever runs next. That ordering is load-bearing.
         scriptlock --version
 
     - name: Install Chromium
       shell: bash
-      # Install with the playwright-core bundled inside the just-installed scriptlock,
-      # so the browser revision is exactly the one the CLI looks for.
-      run: node "$(npm root -g)/scriptlock/node_modules/playwright-core/cli.js" install --with-deps chromium
+      # `scriptlock install-browser` resolves the playwright-core bundled inside the
+      # just-installed scriptlock and runs it by path, so the browser revision is exactly
+      # the one the CLI launches. It replaced a hard-coded "$(npm root -g)/scriptlock/
+      # node_modules/playwright-core/cli.js": that encoded the layout of npm's global tree
+      # into this file, and the same PATH assumption is what made the documented pnpm and
+      # yarn install commands unrunnable.
+      run: scriptlock install-browser --with-deps chromium
 
     - name: Scan and diff
       id: diff

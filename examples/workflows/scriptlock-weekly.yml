@@ -45,7 +45,7 @@ jobs:
       # commit SHA for the action, and an exact version for the tool that produces the
       # evidence. "latest" would silently change what ran between two weekly reports.
       - name: Scriptlock
-        uses: vladimirnizovtsev/scriptlock@v0.2.1
+        uses: vladimirnizovtsev/scriptlock@v0.3.0
         env:
           # Referenced by browser.extraHeaders in scriptlock.config.yaml. A missing
           # variable is a configuration error, so define every ${VAR} the config
@@ -59,6 +59,6 @@ jobs:
           profile: ${{ matrix.profile }}
           mode: drift
           history: "true"
-          version: "0.2.1"
+          version: "0.3.0"
           # summary: "false"      # counts and exit code only, no page map in the log
           # artifact-name: "scriptlock-${{ matrix.profile }}-${{ matrix.environment }}"

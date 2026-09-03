@@ -22,26 +22,26 @@ Node 22 or later, in a directory that has a `package.json`. Scriptlock ships no 
 
 ```sh
 npm install --save-dev scriptlock
-npx playwright-core install chromium
+npx scriptlock install-browser
 ```
 
 **pnpm**
 
 ```sh
 pnpm add -D scriptlock
-pnpm exec playwright-core install chromium
+pnpm exec scriptlock install-browser
 ```
 
 **yarn**
 
 ```sh
 yarn add -D scriptlock
-yarn playwright-core install chromium
+yarn scriptlock install-browser
 ```
 
-Use the one your project already uses. Running `npm install` in a project whose lockfile belongs to pnpm or yarn can fail inside npm itself, with `Cannot read properties of null (reading 'matches')` and no explanation.
+Use the one your project already uses, and only that one. `npm install` in a pnpm project makes npm read a tree of symlinks it did not build, and it can fail inside npm itself with `Cannot read properties of null (reading 'matches')` and no explanation; in a yarn project it leaves a second lockfile and a second tree to drift apart. If you already ran it, delete `node_modules` and the `package-lock.json` it wrote, then install again with your own manager.
 
-The rest of this walkthrough writes `npx scriptlock`. With pnpm that is `pnpm exec scriptlock`, with yarn `yarn scriptlock`.
+The rest of this walkthrough writes `npx scriptlock`. With pnpm that is `pnpm exec scriptlock`, with yarn `yarn scriptlock`; Scriptlock prints its own commands with the prefix your project uses.
 
 ### 2. Say which page to watch
 
@@ -163,10 +163,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: vladimirnizovtsev/scriptlock@v0.2.1
+      - uses: vladimirnizovtsev/scriptlock@v0.3.0
         with:
           mode: gate
-          version: "0.2.1"
+          version: "0.3.0"
 
   drift:
     if: github.event_name != 'pull_request'
@@ -175,11 +175,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: vladimirnizovtsev/scriptlock@v0.2.1
+      - uses: vladimirnizovtsev/scriptlock@v0.3.0
         with:
           mode: drift
           history: "true"
-          version: "0.2.1"
+          version: "0.3.0"
 ```
 
 ![a GitHub Actions run summary for the demo repository: gate skipped on a manual run, drift failed](https://raw.githubusercontent.com/vladimirnizovtsev/scriptlock/main/media/05-ci-red-check.png)
@@ -205,6 +205,89 @@ npx scriptlock report --format md --out inventory.md
 If your build renames every chunk on every deploy (Next.js, Vite, Nuxt, Astro, webpack), authorise the build output directory with a single `approve --match` entry instead of approving chunks one by one. Read the tradeoff first, because a glob authorises whatever matches it: [Content-hashed bundles](#content-hashed-bundles).
 
 ---
+
+## More than one page
+
+A real site has more than one page worth watching, and a payment form you usually have to walk to. Both are profiles in the same configuration file.
+
+```yaml
+version: 1
+profiles:
+  home:
+    url: https://shop.example.com/
+    wait: load
+    settleMs: 2500
+
+  checkout:
+    url: https://shop.example.com/checkout
+    wait: load
+    settleMs: 3000
+    runs: 2                    # union two runs, so a tag that loads only sometimes is not "removed"
+
+  # The payment form is not reachable by URL, so walk to it.
+  checkout-flow:
+    url: https://shop.example.com/
+    steps:
+      - click: "text=Add to cart"
+      - click: "text=Checkout"
+      - waitFor: "#payment iframe"
+      - wait: 1500
+    settleMs: 3000
+```
+
+Each profile keeps its own manifest, so approving a script on one page does not authorise it on another:
+
+```sh
+npx scriptlock scan   --profile checkout      # .scriptlock/last.checkout.json
+npx scriptlock approve --profile checkout --all-new --owner web --category functional \
+  --justification "Checkout inventory, reviewed in PR #42"
+npx scriptlock diff   --profile checkout --gate
+```
+
+`default` writes `scriptlock.lock.yaml`; every other profile writes `scriptlock.<profile>.lock.yaml`. Set `manifest:` on a profile to override that, including to point two profiles at one shared manifest.
+
+### Steps
+
+Available steps: `goto`, `click`, `fill`, `select`, `waitFor`, `wait`, `press`, `screenshot`. `goto` takes a path relative to the profile URL. Selectors are Playwright selectors, so `text=Checkout`, `#payment iframe` and `[data-testid=pay]` all work.
+
+**A flow records every page it walks, not just the last one.** Scanning a checkout directly and reaching the same checkout through the storefront do not produce the same inventory: the second one also contains the storefront's scripts, each entry carrying the page it ran on in `frameUrl`. That is honest about what executed during the journey, and it is wider than a payment-page inventory. If you want only the payment page, give it its own profile with its own URL. If you want the journey, use steps and expect the manifest to cover it.
+
+For anything the step list cannot express, point `steps` at a module instead:
+
+```yaml
+  checkout-flow:
+    url: https://shop.example.com/
+    steps: ./scriptlock/checkout-flow.ts     # default export: async (page) => void
+```
+
+`.js` and `.mjs` are imported directly; `.ts` needs `tsx` as a direct dependency of your project. See [examples/checkout-flow.ts](examples/checkout-flow.ts). For a page behind a login, reuse a Playwright `storageState` file through `browser.storageState` rather than putting credentials in a step.
+
+Production scans stop at the rendered payment form. Never fill in or submit a card.
+
+### One CI job per page
+
+The Action takes one profile, so a matrix runs them all and each page gets its own check, its own artifact and its own verdict:
+
+```yaml
+jobs:
+  drift:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false          # one failing page must not hide the others
+      matrix:
+        profile: [home, checkout, checkout-flow]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: vladimirnizovtsev/scriptlock@v0.3.0
+        with:
+          profile: ${{ matrix.profile }}
+          mode: drift
+          history: "true"
+          version: "0.3.0"
+```
 
 ## Reference
 
@@ -488,7 +571,7 @@ profiles:
 
 `wait` defaults to `load`. Avoid `networkidle`: it waits for two seconds of network silence, and a storefront with analytics beacons, long polling or refreshing ads never goes quiet, so the scan times out instead of collecting. When tags arrive late, raise `settleMs` rather than changing `wait`.
 
-Available steps: `goto`, `click`, `fill`, `select`, `waitFor`, `wait`, `press`, `screenshot`. For anything more, `steps: ./checkout-flow.ts` loads a module whose default export is `async (page: Page) => void`; `.js` and `.mjs` are imported directly, `.ts` needs `tsx` installed. See [examples/checkout-flow.ts](examples/checkout-flow.ts). Authenticated flows reuse a Playwright `storageState` file via `browser.storageState`.
+Available steps: `goto`, `click`, `fill`, `select`, `waitFor`, `wait`, `press`, `screenshot`. For anything more, `steps: ./checkout-flow.ts` loads a module whose default export is `async (page: Page) => void`; `.js` and `.mjs` are imported directly, `.ts` needs `tsx` installed as a direct dependency of the project that runs the CLI (`npm install --save-dev tsx`, `pnpm add -D tsx`, `yarn add -D tsx`) — pnpm and Yarn Berry expose nothing a project has not declared. See [examples/checkout-flow.ts](examples/checkout-flow.ts). Authenticated flows reuse a Playwright `storageState` file via `browser.storageState`.
 
 Production scans stop at the rendered payment form. Never fill in or submit a card.
 
@@ -504,6 +587,7 @@ Bot management (Cloudflare, Akamai, DataDome and others) must allowlist the scan
 
 ```
 scriptlock init   [--url <url>] [--force]         write scriptlock.config.yaml with a "default" profile
+scriptlock install-browser [browsers...] [--with-deps]   install the Chromium build this scriptlock drives
 scriptlock scan   [--profile <name>] [--runs N] [--out <file>] [--config <path>] [--json]
 scriptlock diff   [--profile <name>] [--gate|--drift] [--snapshot <file>] [--format text|md|json]
                [--history|--no-history] [--config <path>] [--out <file>]
@@ -515,13 +599,17 @@ scriptlock approve <id...> [--all-new] [--match <glob>] [--replace] --owner <s> 
 scriptlock report [--profile <name>] [--format md|json] [--snapshot <file>] [--out <file>]
 ```
 
-Global options: `--config <path>`, `--verbose`, `--no-color`. `scan` writes `.scriptlock/last.<profile>.json` unless `--out` is given. `diff` runs a scan unless `--snapshot` is given, and that scan replaces `.scriptlock/last.<profile>.json` so `approve` can act on what the diff just reported; a blocked scan is written to `.scriptlock/blocked.<profile>.json` instead, so a challenge page cannot destroy the last good snapshot. `--history` and `--no-history` both override the profile's `history` setting; with neither, the profile decides, so a script that runs `diff` twice over one scan can pass `--no-history` to the second and leave exactly one line in the history index. `approve` reads the last snapshot unless `--snapshot` is given; `--approved-by` defaults to `git config user.name` or `$USER`, and `approvedAt` is today's UTC date. `approve --match <glob>` writes the single glob entry described in [Content-hashed bundles](#content-hashed-bundles), refuses a glob wider than one directory of one host, and lists every observed script it authorises with that script's scope; it writes one entry, so it cannot be combined with script ids, `--all-new` or `--refresh`. `--replace` (only with `--match`) removes the exact-id entries the glob makes redundant. Categories: `payment`, `functional`, `framework`, `tag-manager`, `analytics`, `marketing`, `advertising`, `consent`, `customer-success`, `security`, `ab-testing`, `cdn`, `other`.
+Global options: `--config <path>`, `--verbose`, `--no-color`. `--config` selects the configuration file only: the manifest and `.scriptlock/` are resolved against the current directory, never against the directory of the configuration file, so a configuration in a subdirectory of a monorepo has to be run from that subdirectory or its manifest lands somewhere else. (The GitHub Action states the same rule for `working-directory`.)
 
-Exit codes: 0 clean, 1 findings at fail severity (or no manifest yet), 2 run error — a blocked scan, a navigation failure, an invalid configuration, a missing browser, a usage error, or a Node older than 22. `scriptlock` with no command prints help and exits 2, so a dropped argument in CI is never mistaken for a finding.
+`install-browser` runs the `playwright-core` bundled inside Scriptlock, resolved by path rather than looked up on `PATH`, and installs `chromium` unless you name other browsers. It is a subcommand rather than a documented `playwright-core install chromium` because `playwright-core` is a transitive dependency of Scriptlock: npm and Yarn Classic hoist its binary into `node_modules/.bin`, pnpm and Yarn Berry link no binary for a transitive dependency at all, and a separately installed `playwright-core` can fetch a browser revision that this Scriptlock does not launch. `--with-deps` also installs the operating system libraries the browser needs, which is Linux-only and needs root.
+
+`scan` writes `.scriptlock/last.<profile>.json` unless `--out` is given. `diff` runs a scan unless `--snapshot` is given, and that scan replaces `.scriptlock/last.<profile>.json` so `approve` can act on what the diff just reported; a blocked scan is written to `.scriptlock/blocked.<profile>.json` instead, so a challenge page cannot destroy the last good snapshot. `--history` and `--no-history` both override the profile's `history` setting; with neither, the profile decides, so a script that runs `diff` twice over one scan can pass `--no-history` to the second and leave exactly one line in the history index. `approve` reads the last snapshot unless `--snapshot` is given; `--approved-by` defaults to `git config user.name` or `$USER`, and `approvedAt` is today's UTC date. `approve --match <glob>` writes the single glob entry described in [Content-hashed bundles](#content-hashed-bundles), refuses a glob wider than one directory of one host, and lists every observed script it authorises with that script's scope; it writes one entry, so it cannot be combined with script ids, `--all-new` or `--refresh`. `--replace` (only with `--match`) removes the exact-id entries the glob makes redundant. Categories: `payment`, `functional`, `framework`, `tag-manager`, `analytics`, `marketing`, `advertising`, `consent`, `customer-success`, `security`, `ab-testing`, `cdn`, `other`.
+
+Exit codes: 0 clean, 1 findings at fail severity (or no manifest yet), 2 run error — a blocked scan, a navigation failure, an invalid configuration, a missing browser, a failed `install-browser`, a usage error, or a Node older than 22. `scriptlock` with no command prints help and exits 2, so a dropped argument in CI is never mistaken for a finding.
 
 ### Library API
 
-Scriptlock is a CLI. The package also has an importable entry point, but at 0.2.x only `scan`, `diff`, `readManifest`, `writeManifest`, the Zod schemas and the exported types are treated as public. Everything else `scriptlock` exports is an internal helper that may be renamed or removed in any release without a major version bump.
+Scriptlock is a CLI. The package also has an importable entry point — ESM only, Node 22 or later: use `import` or a dynamic `import()`, because the package declares no `require` condition and `require('scriptlock')` fails with `ERR_PACKAGE_PATH_NOT_EXPORTED` from a CommonJS file such as a `next.config.js`. At 0.2.x only `scan`, `diff`, `readManifest`, `writeManifest`, the Zod schemas and the exported types are treated as public. Everything else `scriptlock` exports is an internal helper that may be renamed or removed in any release without a major version bump.
 
 ### GitHub Action
 
@@ -530,13 +618,13 @@ The repository root contains a composite action. It validates its inputs, instal
 The action is versioned by its git ref, not by npm: the runner reads `action.yml` from the ref in `uses:`, so a fix to the action reaches you when you change that ref. Pin it to a full commit SHA (best) or to a release tag; the `version:` input separately pins the npm package that produces the evidence.
 
 ```yaml
-- uses: vladimirnizovtsev/scriptlock@v0.2.1
+- uses: vladimirnizovtsev/scriptlock@v0.3.0
   with:
     profile: default          # profile from scriptlock.config.yaml
     mode: gate                # gate | drift
     config: scriptlock.config.yaml  # default is empty: look up .yaml, then .yml
     node-version: "22"
-    version: "0.2.1"          # npm version of the CLI; "latest" is not reproducible
+    version: "0.3.0"          # npm version of the CLI; "latest" is not reproducible
     history: "false"          # also write .scriptlock/history/<profile>/
     working-directory: .      # the manifest and .scriptlock/ resolve against this
     summary: "true"           # publish the report to the job summary and the log

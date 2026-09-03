@@ -4,10 +4,34 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.3.0] - 2026-09-03
+
+Installation, and the commands Scriptlock prints for you to run. Nothing about the scan, the identity model, the diff matrix or the manifest format changed, and no manifest needs regenerating. If Scriptlock is already installed and scanning, there is nothing here to upgrade for; this release exists so that a fresh install under pnpm or yarn reads instructions that work, and so that a reader who gets stuck is handed a command that runs.
+
+### Added
+
+- Documentation for watching more than one page: profiles for several URLs in one configuration, the step list for walking to a payment form that has no URL of its own, the per-profile manifest naming rule, and a CI matrix that gives each page its own check and its own artifact. It also states something the tool did not say anywhere: a profile with steps records every page the flow walks, not only the last one, so a checkout reached through the storefront yields a wider inventory than the same checkout scanned directly.
+
+- `scriptlock install-browser`: installs the Chromium build this Scriptlock drives, using the `playwright-core` bundled inside the package, resolved by path instead of looked up on `PATH`. One command under every package manager — npm, pnpm, Yarn Classic and Yarn Berry's PnP — and one that cannot drift from the browser revision the CLI actually launches, which a separately installed `playwright-core` can. `--with-deps` passes through for the Linux system libraries.
+
+### Fixed
+
+- The install instructions covered npm only, and a reader following them in a pnpm project got a crash inside npm's own dependency resolver. The obvious repair — document `pnpm exec playwright-core install chromium` and `yarn playwright-core install chromium` alongside the npm line — is wrong, and the draft of this release carried it: neither command exists. `playwright-core` is a *transitive* dependency of Scriptlock, and only npm and Yarn Classic hoist a transitive package's binary into `node_modules/.bin`; pnpm and Yarn Berry link none, so there is no `playwright-core` command to run. The README and the missing-browser error now both name `scriptlock install-browser`. Found by a reader installing 0.2.1 into their own pnpm site.
+- The missing-browser error printed three commands and asked the reader to pick the one for their package manager. Two were wrong for any given reader, and under pnpm and Yarn Berry the one that looked right was the broken one — the tool misdirected exactly the users it was changed for. It now detects the manager (`npm_config_user_agent`, then the nearest lockfile) and prints one command.
+- Every command Scriptlock prints for you to run now carries that manager's runner: `npx scriptlock scan`, `pnpm exec scriptlock scan`, `yarn scriptlock scan`. The numbered next steps from `scriptlock init`, the `approve --all-new` instructions a first `diff` prints, and the `approve --match` bundle hint were bare `scriptlock …`, which is `command not found` in every project the README tells you to create, because Scriptlock is installed as a development dependency and is on no `PATH`.
+- The error for a `.ts` flow module without `tsx` hard-coded `npm install --save-dev tsx` — in a pnpm project, the very command that crashed npm in the original report. It names the detected manager's command now, and says that `tsx` has to be a direct dependency of the project that runs the CLI, because pnpm and Yarn Berry expose nothing a project has not declared.
+- The GitHub Action installed Chromium through a path hard-coded into npm's global tree (`$(npm root -g)/scriptlock/node_modules/playwright-core/cli.js`). It runs `scriptlock install-browser --with-deps chromium` instead. The `scriptlock --version` line stays in the install step ahead of it, and now says why: on too old a `node-version` it is what produces "scriptlock requires Node 22 or later" rather than an unexplained crash later.
+
 ### Changed
 
-- The README's install step covers npm, pnpm and yarn, and says which command runs the CLI under each. It assumed npm, and following it in a pnpm or yarn project fails inside npm itself with `Cannot read properties of null (reading 'matches')` and no explanation. Found by a reader trying it on their own site.
-- The error for a missing browser named only the npm command. It now names the pnpm and yarn ones too, which matters because `playwright-core` is a transitive dependency and pnpm does not hoist it where the npm command expects it.
+- The annotated `scriptlock.config.yaml` that `init` writes points at `scriptlock install-browser` for the Chromium install, and so does `examples/scriptlock.config.yaml`. This text is shipped output, written into every new user's configuration file.
+- The README attributes the `Cannot read properties of null (reading 'matches')` crash to what actually causes it — npm reading a `node_modules` tree that pnpm built out of symlinks — gives yarn the problem that applies to yarn instead (a second lockfile and a second tree, drifting apart in silence), and says how to recover if you already ran the wrong install.
+- The README's Library API section states that the package is ESM only. `require('scriptlock')` from a CommonJS file such as a `next.config.js` fails with `ERR_PACKAGE_PATH_NOT_EXPORTED`; `import` and dynamic `import()` work.
+- The CLI reference states that `--config` selects the configuration file only, and that the manifest and `.scriptlock/` resolve against the current directory and not against that file — the rule the GitHub Action section already gave for `working-directory`, and a trap in a monorepo.
+- The bug report template and `SECURITY.md` ask for the version the way the reporter's own package manager runs it. `npx scriptlock --version` in a project with no `node_modules` — Yarn Berry's PnP, or a project where the install silently failed — reports a registry copy rather than the installed one, with no warning that it did.
+- CI installs the packed tarball under npm, pnpm, Yarn Classic and Yarn Berry and runs the documented walkthrough with each, ending with the browser install and a real scan. Nothing in this repository installed Scriptlock the way a reader is told to, which is how an install command that had never been run reached a release twice. That is the defect class of this release.
 
 ## [0.2.1] - 2026-09-03
 
@@ -101,7 +125,8 @@ First release.
 - Fixture site and server for e2e tests; unit tests for every rule in the design.
 - Documentation: README with limits, requirement mapping, evidence guidance and comparison; CONTRIBUTING, SECURITY.
 
-[Unreleased]: https://github.com/vladimirnizovtsev/scriptlock/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/vladimirnizovtsev/scriptlock/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/vladimirnizovtsev/scriptlock/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/vladimirnizovtsev/scriptlock/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/vladimirnizovtsev/scriptlock/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/vladimirnizovtsev/scriptlock/releases/tag/v0.1.0
