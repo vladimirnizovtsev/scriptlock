@@ -4,7 +4,10 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- The install step now says how to tell which package manager a project uses (the lockfile, or a `packageManager` field, which in a monorepo is the one at the repository root) instead of leaving the reader to guess between three equal-looking blocks. It also names what going wrong looks like in a workspace: npm reports `EUNSUPPORTEDPROTOCOL Unsupported URL Type "workspace:"`, and Yarn Classic, which does not know that protocol either, looks for the repository's own internal packages in the public registry and reports them as 404. Neither error mentions Scriptlock. Found by a reader installing into a pnpm workspace.
+- Says where a monorepo user should install and run it, and that the configuration, the manifest and `.scriptlock/` are relative to the directory the command runs in rather than to the repository root.
 
 ## [0.4.0] - 2026-09-03
 

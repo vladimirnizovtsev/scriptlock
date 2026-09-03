@@ -18,6 +18,8 @@ This is a complete run against a live page, and every screenshot below is real o
 
 Node 22 or later, in a directory that has a `package.json`. Scriptlock ships no browser, so Chromium is installed once.
 
+Use the package manager this project already uses. Its lockfile says which: `pnpm-lock.yaml` means pnpm, `yarn.lock` means yarn, `package-lock.json` means npm. A `packageManager` field in `package.json` overrides all three, and in a monorepo it is the one at the repository root that counts.
+
 **npm**
 
 ```sh
@@ -39,7 +41,9 @@ yarn add -D scriptlock
 yarn scriptlock install-browser
 ```
 
-Use the one your project already uses, and only that one. `npm install` in a pnpm project makes npm read a tree of symlinks it did not build, and it can fail inside npm itself with `Cannot read properties of null (reading 'matches')` and no explanation; in a yarn project it leaves a second lockfile and a second tree to drift apart. If you already ran it, delete `node_modules` and the `package-lock.json` it wrote, then install again with your own manager.
+Reaching for the wrong one does not fail gracefully, and the error will not mention Scriptlock. `npm install` in a pnpm project makes npm read a tree of symlinks it did not build and can fail inside npm itself with `Cannot read properties of null (reading 'matches')`. In a workspace whose packages depend on each other with `workspace:*`, npm answers `EUNSUPPORTEDPROTOCOL Unsupported URL Type "workspace:"`, and Yarn Classic, which does not know that protocol either, goes looking for your own internal packages in the public registry and reports them as 404. If you already ran the wrong one, delete `node_modules` and any lockfile it wrote that is not yours, then install again with the right one.
+
+In a monorepo, install and run Scriptlock inside the workspace package whose page you are scanning. The configuration, the manifest and `.scriptlock/` are read and written relative to the directory you run the command in, not relative to the repository root.
 
 The rest of this walkthrough writes `npx scriptlock`. With pnpm that is `pnpm exec scriptlock`, with yarn `yarn scriptlock`; Scriptlock prints its own commands with the prefix your project uses.
 
