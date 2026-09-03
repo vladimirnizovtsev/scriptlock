@@ -79,10 +79,10 @@ Releasing the GitHub Action is a git tag, not an npm publish. The runner reads `
    git tag -a v0.4.0 -m "v0.4.0" && git push origin v0.4.0
    ```
 
-4. Advance the moving tags, so a workflow that pinned a tag rather than a SHA can receive the fix at all. `v0.1` tracks the latest patch of the 0.1 line and `v0` tracks the latest 0.x release; before 1.0 a minor may break, so say so in the changelog when `v0` crosses one.
+4. Advance the moving tags, so a workflow that pinned a tag rather than a SHA can receive the fix at all. `v0.4` tracks the latest patch of the 0.4 line and `v0` tracks the latest 0.x release; before 1.0 a minor may break, so say so in the changelog when `v0` crosses one. The three version numbers in the two lines below must agree: a release once pushed `v0.2` while creating `v0.3`, which left the moving tag pointing at the previous release, and `test/unit/docs.test.ts` now fails the build if they drift again.
 
    ```sh
-   git tag -f v0.4 v0.4.0 && git push -f origin v0.3
+   git tag -f v0.4 v0.4.0 && git push -f origin v0.4
    git tag -f v0   v0.4.0 && git push -f origin v0
    ```
 
