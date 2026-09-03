@@ -17,7 +17,7 @@ import { CONFIG_FILE_NAMES, parseConfig } from '../config/load.js';
 import { DEFAULT_PROFILE_URL, DEFAULT_SETTLE_MS, DEFAULT_TIMEOUT_MS, DEFAULT_VIEWPORT } from '../config/schema.js';
 import { ScriptlockError } from '../errors.js';
 import { scriptlockCommand } from '../runner.js';
-import type { CommandContext } from './scan.js';
+import type { CommandContext } from './context.js';
 
 export interface InitCommandOptions {
   /** URL of the default profile. */

@@ -13,20 +13,10 @@
  * not cut off; GitHub tables scroll horizontally. Truncation never leaves an
  * unbalanced backtick.
  */
-import { findFrameEntry, findScriptEntry } from '../manifest/match.js';
-import {
-  SECURITY_HEADER_NAMES,
-  type DiffEvent,
-  type DiffResult,
-  type Manifest,
-  type ManifestScript,
-  type ObservedScript,
-  type Scope,
-  type Snapshot,
-} from '../types.js';
-import { exitCodeMeaning, shortValue } from './text.js';
+import { SECURITY_HEADER_NAMES, type DiffEvent, type DiffResult, type Manifest, type Snapshot } from '../types.js';
+import { buildInventory, integrityLabel } from './inventory.js';
+import { eventValues, exitCodeMeaning } from './text.js';
 
-const SCOPE_ORDER: readonly Scope[] = ['merchant', 'tpsp', 'threeds', 'embedded'];
 const MAX_CELL = 200;
 
 function flatten(value: string): string {
@@ -55,14 +45,8 @@ function table(header: string[], rows: string[][]): string[] {
 }
 
 function eventRow(event: DiffEvent): string[] {
-  let message = event.message;
-  if (event.before !== undefined || event.after !== undefined) {
-    const before = event.before === undefined ? '(none)' : shortValue(event.before);
-    const after = event.after === undefined ? '(none)' : shortValue(event.after);
-    if (!(event.before !== undefined && event.message.includes(shortValue(event.before)))) {
-      message += ` (before: ${code(before)}, after: ${code(after)})`;
-    }
-  }
+  const values = eventValues(event);
+  const message = values === undefined ? event.message : `${event.message} (before: ${code(values.before)}, after: ${code(values.after)})`;
   return [event.type, event.severity, event.scope ?? '', code(event.subject), message];
 }
 
@@ -127,88 +111,37 @@ export function renderMarkdown(result: DiffResult): string {
   return lines.join('\n');
 }
 
-export type InventoryStatus = 'approved' | 'unapproved' | 'stale';
-
-/** stale: the approved hash of a strict (sha256) or structural (structuralHash) entry differs. */
-export function inventoryStatus(script: ObservedScript, entry: ManifestScript | undefined): InventoryStatus {
-  if (!entry) return 'unapproved';
-  if (entry.integrity === 'strict' && entry.sha256 !== undefined && entry.sha256 !== script.sha256) return 'stale';
-  if (
-    entry.integrity === 'structural' &&
-    entry.structuralHash !== undefined &&
-    entry.structuralHash !== script.structuralHash
-  ) {
-    return 'stale';
-  }
-  return 'approved';
-}
-
-export function integrityLabel(entry: ManifestScript | undefined): string {
-  if (!entry) return 'none';
-  if (entry.kind === 'worker') return 'body not captured (url-only)';
-  if (entry.integrity === 'track' || entry.integrity === 'url-only') {
-    return `not assured (${entry.integrityMethod}) [${entry.integrity}]`;
-  }
-  return `${entry.integrity} (${entry.integrityMethod})`;
-}
-
-interface InventoryRow {
-  script: ObservedScript;
-  entry: ManifestScript | undefined;
-  status: InventoryStatus;
-}
-
 export function renderInventoryMarkdown(snapshot: Snapshot, manifest: Manifest): string {
+  const inventory = buildInventory(snapshot, manifest);
+  const { counts } = inventory;
   const lines: string[] = [];
-  const scripts = snapshot.scripts.filter((s) => s.scope !== 'harness');
-  const rows: InventoryRow[] = scripts.map((script) => {
-    const entry = findScriptEntry(manifest, script);
-    return { script, entry, status: inventoryStatus(script, entry) };
-  });
-  const counts = { approved: 0, unapproved: 0, stale: 0 };
-  for (const row of rows) counts[row.status] += 1;
 
-  lines.push(`## Scriptlock inventory: ${snapshot.profile}`);
+  lines.push(`## Scriptlock inventory: ${inventory.profile}`);
   lines.push('');
-  lines.push(`URL: ${snapshot.url}  `);
-  lines.push(`Scanned: ${snapshot.finishedAt} (${snapshot.runs} run${snapshot.runs === 1 ? '' : 's'})  `);
+  lines.push(`URL: ${inventory.url}  `);
+  lines.push(`Scanned: ${inventory.scannedAt} (${inventory.runs} run${inventory.runs === 1 ? '' : 's'})  `);
   lines.push(
-    `Scripts: ${rows.length} observed, ${counts.approved} approved, ${counts.unapproved} unapproved, ${counts.stale} stale`,
+    `Scripts: ${counts.scripts} observed, ${counts.approved} approved, ${counts.unapproved} unapproved, ${counts.stale} stale`,
   );
-  if (snapshot.blocked) {
+  if (inventory.blocked) {
     lines.push('');
     lines.push(
-      `**Warning: a bot-management challenge page was detected (${snapshot.blocked.vendor}); this inventory is unreliable.**`,
+      `**Warning: a bot-management challenge page was detected (${inventory.blocked.vendor}); this inventory is unreliable.**`,
     );
   }
   lines.push('');
 
   const header = ['Script', 'Kind', 'Status', 'Integrity', 'Entity', 'Loaded by'];
-  for (const scope of SCOPE_ORDER) {
-    const inScope = rows.filter((r) => r.script.scope === scope);
-    if (inScope.length === 0) continue;
-    lines.push(`### Scope: ${scope} (${inScope.length} script${inScope.length === 1 ? '' : 's'})`);
+  for (const section of inventory.scopes) {
+    lines.push(`### Scope: ${section.scope} (${section.count} script${section.count === 1 ? '' : 's'})`);
     lines.push('');
-    const groups = new Map<string, InventoryRow[]>();
-    for (const row of inScope) {
-      const key = row.entry ? `${row.entry.owner} / ${row.entry.category}` : 'unapproved';
-      const list = groups.get(key) ?? [];
-      list.push(row);
-      groups.set(key, list);
-    }
-    const keys = [...groups.keys()].sort((a, b) => {
-      if (a === 'unapproved') return 1;
-      if (b === 'unapproved') return -1;
-      return a.localeCompare(b);
-    });
-    for (const key of keys) {
-      const list = (groups.get(key) ?? []).slice().sort((a, b) => a.script.id.localeCompare(b.script.id));
-      lines.push(`#### ${key === 'unapproved' ? 'Unapproved' : `Owner / category: ${key}`}`);
+    for (const group of section.groups) {
+      lines.push(`#### ${group.owner === null ? 'Unapproved' : `Owner / category: ${group.owner} / ${group.category}`}`);
       lines.push('');
       lines.push(
         ...table(
           header,
-          list.map((row) => [
+          group.rows.map((row) => [
             code(row.script.id),
             row.script.kind,
             row.status,
@@ -222,26 +155,20 @@ export function renderInventoryMarkdown(snapshot: Snapshot, manifest: Manifest):
     }
   }
 
-  const frames = snapshot.frames.filter((f) => !f.isMain && f.crossOrigin);
-  if (frames.length > 0) {
-    lines.push(`### Cross-origin frames (${frames.length})`);
+  if (inventory.frames.length > 0) {
+    lines.push(`### Cross-origin frames (${inventory.frames.length})`);
     lines.push('');
-    lines.push(
-      ...table(
-        ['Frame', 'Scope', 'Status'],
-        frames.map((frame) => [frame.url, frame.scope, findFrameEntry(manifest, frame) ? 'approved' : 'unapproved']),
-      ),
-    );
+    lines.push(...table(['Frame', 'Scope', 'Status'], inventory.frames.map((frame) => [frame.url, frame.scope, frame.status])));
     lines.push('');
   }
 
-  const present = SECURITY_HEADER_NAMES.filter((name) => snapshot.headers[name] !== undefined);
-  lines.push(`### Security headers (policy: ${manifest.headers.policy})`);
+  const present = SECURITY_HEADER_NAMES.filter((name) => inventory.headers.values[name] !== undefined);
+  lines.push(`### Security headers (policy: ${inventory.headers.policy})`);
   lines.push('');
   if (present.length === 0) {
     lines.push('No security headers observed on the main document.');
   } else {
-    lines.push(...table(['Header', 'Value'], present.map((name) => [name, code(snapshot.headers[name] ?? '')])));
+    lines.push(...table(['Header', 'Value'], present.map((name) => [name, code(inventory.headers.values[name] ?? '')])));
   }
   lines.push('');
   return lines.join('\n');

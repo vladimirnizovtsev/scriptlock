@@ -25,7 +25,8 @@ import { renderMarkdown } from '../report/markdown.js';
 import { exitCodeMeaning, renderText } from '../report/text.js';
 import { scriptlockCommand } from '../runner.js';
 import type { DiffMode, DiffResult, Manifest, ScanOptions, Snapshot } from '../types.js';
-import { lastSnapshotPath, loadProfile, plural, readSnapshot, writeSnapshot, type CommandContext } from './scan.js';
+import { loadProfile, plural, type CommandContext } from './context.js';
+import { lastSnapshotPath, readSnapshot, writeSnapshot } from './snapshot.js';
 
 export type DiffFormat = 'text' | 'md' | 'json';
 
@@ -71,7 +72,7 @@ export function historyDir(cwd: string): string {
 }
 
 /** `.scriptlock/blocked.<profile>.json` under `cwd`: a blocked scan, kept out of `last.<profile>.json`. */
-export function blockedSnapshotPath(cwd: string, profile: string): string {
+function blockedSnapshotPath(cwd: string, profile: string): string {
   return path.join(cwd, '.scriptlock', `blocked.${profile}.json`);
 }
 
@@ -91,7 +92,7 @@ function summaryLine(result: DiffResult): string {
   return `${fail} fail, ${warn} warn, ${info} info; exit code ${result.exitCode} (${exitCodeMeaning(result.exitCode)})`;
 }
 
-export function missingManifestInstructions(
+function missingManifestInstructions(
   profile: string,
   manifestPath: string,
   snapshot: Snapshot,

@@ -7,16 +7,19 @@
  * and the union across runs. Source text never leaves this module.
  *
  * Kind detection: a script whose real URL equals a document URL (frame URL or
- * a Document request) is `inline`; empty URL with a stack trace is `eval`;
- * blob:/data: by scheme; everything else URL-addressed is `external`. Worker
- * entries come from Playwright worker events and carry no body hash (their
- * bodies are out of scope in v1).
+ * a Document request) is `inline`; an empty URL is `eval` unless the source
+ * matches a Playwright harness signature, which is the only thing ever dropped
+ * (a stack trace is not a harness signal: `setTimeout(string)` and
+ * `javascript:` URLs are stackless page code, DESIGN.md 3.2); blob:/data: by
+ * scheme; everything else URL-addressed is `external`. Worker entries come from
+ * Playwright worker events and carry no body hash (their bodies are out of
+ * scope in v1).
  *
  * Limitations: a forged sourceURL on a script whose `embedderName` is empty
- * cannot be mapped back to its network URL (recorded as eval when it has a
- * stack, dropped otherwise). Frames that were detached before the end of the
- * run keep their last known URL. Worker scope is taken from the first frame
- * whose origin matches the worker URL, else the main frame.
+ * cannot be mapped back to its network URL, so it is recorded as eval. Frames
+ * that were detached before the end of the run keep their last known URL.
+ * Worker scope is taken from the first frame whose origin matches the worker
+ * URL, else the main frame.
  */
 import { hostname } from 'node:os';
 import type { BrowserContext, BrowserContextOptions, Page } from 'playwright-core';
@@ -161,7 +164,7 @@ async function runOnce(
   let capture: Capture | undefined;
   try {
     const page: Page = await context.newPage();
-    capture = await attachCapture(context, page);
+    capture = await attachCapture(context, page, browserCfg.timeoutMs);
     const version = await capture.version();
 
     try {
@@ -268,13 +271,9 @@ function formatStack(stack: RawStackFrame[]): string[] {
   return stack.map((frame) => `${frame.url}:${frame.line + 1}:${frame.column + 1}`);
 }
 
-function buildRun(capture: Capture, config: ScriptlockConfig, finalUrl: string, html: string, vantage: Vantage): RunResult {
-  const warnings = [...capture.warnings];
-  const mainFrameId = capture.mainFrameId;
-  const mainOrigin = originOf(finalUrl);
-
-  // Resolve blank frames (about:blank, srcdoc) to their nearest navigated ancestor.
-  const effectiveFrameUrl = (frameId: string): string => {
+/** Resolves blank frames (about:blank, srcdoc) to their nearest navigated ancestor. */
+function frameUrlResolver(capture: Capture): (frameId: string) => string {
+  return (frameId: string): string => {
     let current = capture.frames.get(frameId);
     let hops = 0;
     while (current !== undefined && isBlankUrl(current.url) && current.parentId !== undefined && hops < 32) {
@@ -283,8 +282,16 @@ function buildRun(capture: Capture, config: ScriptlockConfig, finalUrl: string, 
     }
     return current?.url ?? '';
   };
+}
 
-  // Frames.
+/**
+ * FrameInfo for every frame that actually navigated. `FrameInfo.url` is
+ * normalised so a provider frame keeps its identity across a deploy
+ * (DESIGN.md 4.1); scope and origin are computed from the raw URL.
+ */
+function buildFrames(capture: Capture, config: ScriptlockConfig, finalUrl: string, effectiveFrameUrl: (frameId: string) => string): FrameInfo[] {
+  const mainFrameId = capture.mainFrameId;
+  const mainOrigin = originOf(finalUrl);
   const frames: FrameInfo[] = [];
   for (const raw of capture.frames.values()) {
     const isMain = raw.id === mainFrameId;
@@ -292,8 +299,6 @@ function buildRun(capture: Capture, config: ScriptlockConfig, finalUrl: string, 
     const rawUrl = isMain ? finalUrl : effectiveFrameUrl(raw.id);
     if (!isMain && isBlankUrl(rawUrl)) continue;
     const origin = raw.securityOrigin !== '' && !isBlankUrl(raw.url) ? raw.securityOrigin : originOf(rawUrl);
-    // FrameInfo.url is normalised so a provider frame keeps its identity across a
-    // deploy (DESIGN.md 4.1); scope and origin are computed from the raw URL.
     const url = isMain ? finalUrl : normalizeUrl(rawUrl, config.identity);
     const frame: FrameInfo = {
       id: raw.id,
@@ -307,22 +312,51 @@ function buildRun(capture: Capture, config: ScriptlockConfig, finalUrl: string, 
     if (raw.parentId !== undefined) frame.parentId = raw.parentId;
     frames.push(frame);
   }
-  const frameById = new Map(frames.map((frame) => [frame.id, frame]));
+  return frames;
+}
 
-  // Main document response: first Document response for the main frame.
-  const mainDoc = [...capture.responses].sort((a, b) => a.order - b.order).find((r) => r.type === 'Document' && r.frameId === mainFrameId);
-  const documentStatus = mainDoc?.status ?? 0;
-  const headers = mainDoc === undefined ? {} : extractSecurityHeaders(mainDoc.headers);
-  if (mainDoc === undefined) warnings.push('no main document response was observed; status and headers are unknown');
-  else if (documentStatus < 200 || documentStatus > 299) {
+interface MainDocument {
+  status: number;
+  headers: SecurityHeaders;
+  /** Raw response headers of the main document, for challenge-page detection. */
+  rawHeaders: Record<string, string> | undefined;
+  warnings: string[];
+}
+
+/** Status and security headers from the first Document response of the main frame. */
+function mainDocument(capture: Capture, finalUrl: string): MainDocument {
+  const response = [...capture.responses]
+    .sort((a, b) => a.order - b.order)
+    .find((r) => r.type === 'Document' && r.frameId === capture.mainFrameId);
+  const status = response?.status ?? 0;
+  const warnings: string[] = [];
+  if (response === undefined) {
+    warnings.push('no main document response was observed; status and headers are unknown');
+  } else if (status < 200 || status > 299) {
     // A typo in profile.url or a page that is temporarily down otherwise yields
     // an empty but perfectly "clean" inventory (DESIGN.md 3.3).
     warnings.push(
-      `the main document ${finalUrl} returned HTTP ${documentStatus}; this is probably an error page, so the inventory is not the page you meant to scan`,
+      `the main document ${finalUrl} returned HTTP ${status}; this is probably an error page, so the inventory is not the page you meant to scan`,
     );
   }
+  return {
+    status,
+    headers: response === undefined ? {} : extractSecurityHeaders(response.headers),
+    rawHeaders: response?.headers,
+    warnings,
+  };
+}
 
-  // Network indexes by URL (first request wins).
+interface NetworkIndex {
+  /** First request seen per URL. */
+  requestByUrl: Map<string, RawRequest>;
+  /** First response headers seen per URL. */
+  responseByUrl: Map<string, Record<string, string>>;
+  /** Every URL known to be a document, so a script parsed at one is inline. */
+  documentUrls: Set<string>;
+}
+
+function indexNetwork(capture: Capture): NetworkIndex {
   const requestByUrl = new Map<string, RawRequest>();
   const documentUrls = new Set<string>();
   for (const request of [...capture.requests].sort((a, b) => a.order - b.order)) {
@@ -334,12 +368,41 @@ function buildRun(capture: Capture, config: ScriptlockConfig, finalUrl: string, 
     if (!responseByUrl.has(response.url)) responseByUrl.set(response.url, response.headers);
   }
   for (const frame of capture.frames.values()) if (!isBlankUrl(frame.url)) documentUrls.add(stripFragment(frame.url));
+  return { requestByUrl, responseByUrl, documentUrls };
+}
 
-  // Scripts.
+/** A script whose initiating id can only be resolved once every id is known. */
+interface PendingInitiator {
+  script: ObservedScript;
+  stack: RawStackFrame[] | undefined;
+  sessionKey: string;
+}
+
+interface BuiltScripts {
+  scripts: ObservedScript[];
+  warnings: string[];
+}
+
+/**
+ * ObservedScript for every parsed script: kind, identity, hashes, scope,
+ * entity and initiator, with the duplicate-identity and scope-priority rules
+ * of DESIGN.md 4.1 and 5 applied.
+ */
+function buildScripts(
+  capture: Capture,
+  config: ScriptlockConfig,
+  network: NetworkIndex,
+  finalUrl: string,
+  effectiveFrameUrl: (frameId: string) => string,
+): BuiltScripts {
+  const { requestByUrl, responseByUrl, documentUrls } = network;
+  const mainFrameId = capture.mainFrameId;
+  const mainOrigin = originOf(finalUrl);
+  const warnings: string[] = [];
   const scripts: ObservedScript[] = [];
   const idByRawKey = new Map<string, string>();
   const idByUrl = new Map<string, string>();
-  const pendingInitiators: { script: ObservedScript; stack: RawStackFrame[] | undefined; sessionKey: string }[] = [];
+  const pendingInitiators: PendingInitiator[] = [];
 
   for (const raw of [...capture.scripts].sort((a, b) => a.order - b.order)) {
     const realUrl = raw.hasSourceURL ? raw.embedderName : raw.url;
@@ -428,33 +491,48 @@ function buildRun(capture: Capture, config: ScriptlockConfig, finalUrl: string, 
     if (script.rawUrl !== undefined && !idByUrl.has(script.rawUrl)) idByUrl.set(script.rawUrl, id);
     const duplicate = scripts.find((existing) => existing.id === id);
     if (duplicate !== undefined) {
-      if (script.rawUrl !== undefined && duplicate.rawUrl !== undefined && script.rawUrl !== duplicate.rawUrl) {
-        // Two different files normalised to one identity, so only the first is
-        // in the inventory. Never silent: an executed script must not vanish.
-        warnings.push(
-          `${duplicate.rawUrl} and ${script.rawUrl} normalise to the same identity ${id}; only the first is recorded, so the inventory is missing one script (set identity.collapseHashes to false, or keepQuery the parameter that distinguishes them)`,
-        );
-      }
-      // Same identity in two frames of one run: keep the strictest scope so a
-      // script that also runs in the merchant frame still gates (DESIGN.md 5).
-      if (SCOPE_PRIORITY[script.scope] < SCOPE_PRIORITY[duplicate.scope]) {
-        warnings.push(
-          `script ${id} runs in both ${duplicate.scope} (${duplicate.frameUrl}) and ${script.scope} (${frameUrl}); recording it in ${script.scope} scope`,
-        );
-        duplicate.scope = script.scope;
-        duplicate.frameId = script.frameId;
-        duplicate.frameUrl = script.frameUrl;
-        duplicate.frameOrigin = script.frameOrigin;
-        duplicate.target = script.target;
-      }
+      warnings.push(...reconcileDuplicate(duplicate, script, id));
       continue;
     }
     scripts.push(script);
     pendingInitiators.push({ script, stack, sessionKey });
   }
 
-  // Second pass: resolve initiating script ids now that every id is known.
-  for (const { script, stack, sessionKey } of pendingInitiators) {
+  resolveInitiators(pendingInitiators, idByRawKey, idByUrl);
+  return { scripts, warnings };
+}
+
+/**
+ * Folds a second observation of one identity into the first, which is the only
+ * one recorded, and reports what that cost. Two different files that normalise
+ * to one identity mean an executed script is missing from the inventory, which
+ * is never silent (DESIGN.md 4.1 rule 3); the same identity in two frames keeps
+ * the strictest scope, so a script that also runs in the merchant frame still
+ * gates (DESIGN.md 5).
+ */
+function reconcileDuplicate(duplicate: ObservedScript, script: ObservedScript, id: string): string[] {
+  const warnings: string[] = [];
+  if (script.rawUrl !== undefined && duplicate.rawUrl !== undefined && script.rawUrl !== duplicate.rawUrl) {
+    warnings.push(
+      `${duplicate.rawUrl} and ${script.rawUrl} normalise to the same identity ${id}; only the first is recorded, so the inventory is missing one script (set identity.collapseHashes to false, or keepQuery the parameter that distinguishes them)`,
+    );
+  }
+  if (SCOPE_PRIORITY[script.scope] < SCOPE_PRIORITY[duplicate.scope]) {
+    warnings.push(
+      `script ${id} runs in both ${duplicate.scope} (${duplicate.frameUrl}) and ${script.scope} (${script.frameUrl}); recording it in ${script.scope} scope`,
+    );
+    duplicate.scope = script.scope;
+    duplicate.frameId = script.frameId;
+    duplicate.frameUrl = script.frameUrl;
+    duplicate.frameOrigin = script.frameOrigin;
+    duplicate.target = script.target;
+  }
+  return warnings;
+}
+
+/** Second pass: fills in `initiator.scriptId` and `loadedBy` now that every id is known. */
+function resolveInitiators(pending: readonly PendingInitiator[], idByRawKey: Map<string, string>, idByUrl: Map<string, string>): void {
+  for (const { script, stack, sessionKey } of pending) {
     if (script.initiator === undefined || stack === undefined) continue;
     const top = stack[0];
     if (top === undefined) continue;
@@ -464,18 +542,33 @@ function buildRun(capture: Capture, config: ScriptlockConfig, finalUrl: string, 
       script.loadedBy = resolved;
     }
   }
+}
 
-  // Worker entries: URL only, no body.
+/** Worker entries: URL only, no body (v1 captures no worker source). */
+function buildWorkerEntries(
+  capture: Capture,
+  config: ScriptlockConfig,
+  network: NetworkIndex,
+  frames: readonly FrameInfo[],
+  finalUrl: string,
+  taken: ReadonlySet<string>,
+): BuiltScripts {
+  const mainFrameId = capture.mainFrameId;
+  const mainOrigin = originOf(finalUrl);
+  const scripts: ObservedScript[] = [];
+  const warnings: string[] = [];
   const seenWorkers = new Set<string>();
+  const mainFrame = frames.find((frame) => frame.id === mainFrameId);
+
   for (const worker of capture.workers) {
     if (seenWorkers.has(worker.url)) continue;
     seenWorkers.add(worker.url);
     const workerOrigin = originOf(worker.url);
-    const frame = frames.find((f) => f.origin === workerOrigin) ?? frameById.get(mainFrameId);
+    const frame = frames.find((f) => f.origin === workerOrigin) ?? mainFrame;
     const frameUrl = frame?.url ?? finalUrl;
     const frameOrigin = frame?.origin ?? mainOrigin;
     const id = deriveId({ kind: 'worker', rawUrl: worker.url, frameOrigin, source: '' }, config.identity);
-    if (scripts.some((existing) => existing.id === id)) continue;
+    if (taken.has(id) || scripts.some((existing) => existing.id === id)) continue;
     const script: ObservedScript = {
       id,
       kind: 'worker',
@@ -493,23 +586,50 @@ function buildRun(capture: Capture, config: ScriptlockConfig, finalUrl: string, 
     };
     const entity = lookupEntity(worker.url);
     if (entity !== undefined) script.entity = entity;
-    const request = requestByUrl.get(worker.url);
+    const request = network.requestByUrl.get(worker.url);
     if (request !== undefined) {
       const initiator: ScriptInitiator = { type: mapInitiatorType(request.initiator.type) };
       if (request.initiator.url !== undefined) initiator.url = request.initiator.url;
       script.initiator = initiator;
-      const responseHeaders = responseByUrl.get(worker.url);
+      const responseHeaders = network.responseByUrl.get(worker.url);
       const picked = responseHeaders === undefined ? undefined : pickScriptResponseHeaders(responseHeaders);
       if (picked !== undefined) script.responseHeaders = picked;
     }
     scripts.push(script);
     warnings.push(`worker ${worker.url}: body not captured (worker bodies are out of scope in v1); recorded with url-only integrity and no body hash`);
   }
+  return { scripts, warnings };
+}
+
+/** Assembles one run's result from the raw capture; each pass owns one job. */
+function buildRun(capture: Capture, config: ScriptlockConfig, finalUrl: string, html: string, vantage: Vantage): RunResult {
+  const effectiveFrameUrl = frameUrlResolver(capture);
+  const frames = buildFrames(capture, config, finalUrl, effectiveFrameUrl);
+  const document = mainDocument(capture, finalUrl);
+  const network = indexNetwork(capture);
+  const parsed = buildScripts(capture, config, network, finalUrl, effectiveFrameUrl);
+  const taken = new Set(parsed.scripts.map((script) => script.id));
+  const workers = buildWorkerEntries(capture, config, network, frames, finalUrl, taken);
 
   const title = extractTitle(html);
-  const blocked = detectBlocked({ status: documentStatus, title, html, url: finalUrl, ...(mainDoc !== undefined ? { headers: mainDoc.headers } : {}) });
+  const blocked = detectBlocked({
+    status: document.status,
+    title,
+    html,
+    url: finalUrl,
+    ...(document.rawHeaders !== undefined ? { headers: document.rawHeaders } : {}),
+  });
 
-  const result: RunResult = { finalUrl, documentStatus, headers, frames, scripts, blocked: undefined, warnings, vantage };
+  const result: RunResult = {
+    finalUrl,
+    documentStatus: document.status,
+    headers: document.headers,
+    frames,
+    scripts: [...parsed.scripts, ...workers.scripts],
+    blocked: undefined,
+    warnings: [...capture.warnings, ...document.warnings, ...parsed.warnings, ...workers.warnings],
+    vantage,
+  };
   if (blocked !== undefined) result.blocked = blocked;
   return result;
 }

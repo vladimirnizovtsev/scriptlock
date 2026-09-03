@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runDiff } from '../../../src/commands/diff.js';
-import type { CommandContext } from '../../../src/commands/scan.js';
+import type { CommandContext } from '../../../src/commands/context.js';
 import { serialiseManifest } from '../../../src/manifest/io.js';
 import { makeManifest, makeSnapshot, MAIN_URL } from '../diff/helpers.js';
 

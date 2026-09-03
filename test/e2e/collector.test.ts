@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { scan } from '../../src/collector/collect.js';
 import type { ObservedScript, Snapshot, ScriptlockConfig } from '../../src/types.js';
-import { start, type FixtureServer } from '../../fixtures/server.js';
+import { COLLIDING_HASHES, settleMsFor, start, type FixtureServer } from '../../fixtures/server.js';
 
 let server: FixtureServer;
 
@@ -25,7 +25,7 @@ function makeConfig(url: string, overrides: Partial<ScriptlockConfig> = {}): Scr
     scope: { tpsp: [], threeds: [] },
     integrity: { firstParty: 'strict', thirdParty: 'track', inline: 'structural', eval: 'structural' },
     profiles: {
-      default: { url, wait: 'load', settleMs: 2500, runs: 1, history: false },
+      default: { url, wait: 'load', settleMs: settleMsFor(), runs: 1, history: false },
     },
     ...overrides,
   };
@@ -156,7 +156,7 @@ describe('collector', () => {
     expect(blob?.initiator?.type).toBe('script');
   });
 
-  it('captures the late script inserted after 1500 ms', () => {
+  it('captures the late script inserted after LATE_TAG_MS', () => {
     const late = byRawUrlSuffix(snapshot, '/late.js');
     expect(late.kind).toBe('external');
     expect(late.initiator?.type).toBe('script');
@@ -194,7 +194,11 @@ describe('collector', () => {
     expect(external.frameOrigin).toBe(server.crossOrigin);
     const inline = snapshot.scripts.find((s) => s.kind === 'inline' && s.frameId === external.frameId);
     expect(inline?.scope).toBe('embedded');
-    expect(inline?.id).toBe(`inline:${server.crossOrigin}:${inline?.structuralHash.slice(0, 16)}`);
+    // Assert the hash exists before deriving the expected id from it: the id is
+    // only evidence of the *prefix* rule, so a missing hash must fail here
+    // rather than throw a TypeError inside the template.
+    expect(inline?.structuralHash).toBeDefined();
+    expect(inline?.id).toBe(`inline:${server.crossOrigin}:${inline?.structuralHash?.slice(0, 16)}`);
     const frame = snapshot.frames.find((f) => f.id === external.frameId);
     expect(frame?.scope).toBe('embedded');
     expect(frame?.crossOrigin).toBe(true);
@@ -271,6 +275,40 @@ describe('collector worker entries', () => {
     expect(snapshot.warnings.some((w) => w.includes('worker.js') && w.includes('not captured'))).toBe(true);
     // Inline scripts still resolve as inline when the document URL has a query string.
     expect(snapshot.scripts.filter((s) => s.kind === 'inline').length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('collector identity collisions', () => {
+  // DESIGN.md 4.1 rule 3: collapsing hash tokens can map two executed files onto
+  // one identity, and only the first is recorded. That must never be silent —
+  // an executed script leaving the inventory is exactly what this tool exists
+  // to prevent.
+  it('warns naming both raw URLs when two files normalise to one identity', async () => {
+    const snapshot = await scan({ config: makeConfig(`${server.origin}/?collide=1`), profile: 'default', toolVersion: '0.0.0-test' });
+    const [first, second] = COLLIDING_HASHES;
+    const collapsedId = `${server.origin}/assets/app.[hash].js`;
+
+    const recorded = snapshot.scripts.filter((s) => s.id === collapsedId);
+    expect(recorded).toHaveLength(1);
+
+    const warning = snapshot.warnings.find((w) => w.includes('normalise to the same identity'));
+    expect(warning, `warnings were: ${snapshot.warnings.join(' | ')}`).toBeDefined();
+    expect(warning).toContain(`${server.origin}/assets/app.${first}.js`);
+    expect(warning).toContain(`${server.origin}/assets/app.${second}.js`);
+    expect(warning).toContain(collapsedId);
+    // The warning has to name the way out, not just the problem.
+    expect(warning).toContain('collapseHashes');
+  });
+
+  it('records both files when collapseHashes is off, with no warning', async () => {
+    const config = makeConfig(`${server.origin}/?collide=1`, {
+      identity: { stripQuery: [], keepQuery: [], collapseHashes: false },
+    });
+    const snapshot = await scan({ config, profile: 'default', toolVersion: '0.0.0-test' });
+    for (const hash of COLLIDING_HASHES) {
+      expect(snapshot.scripts.some((s) => s.id === `${server.origin}/assets/app.${hash}.js`)).toBe(true);
+    }
+    expect(snapshot.warnings.some((w) => w.includes('normalise to the same identity'))).toBe(false);
   });
 });
 

@@ -16,14 +16,24 @@ import { Command, CommanderError, InvalidArgumentError, Option } from 'commander
 import pc from 'picocolors';
 import { renderPolicyTable } from './diff/policy.js';
 import { isScriptlockError } from './errors.js';
-import { APPROVABLE_SCOPES, INTEGRITY_METHODS, INTEGRITY_POLICIES, runApprove, SCRIPT_CATEGORIES } from './commands/approve.js';
+import { runApprove } from './commands/approve.js';
 import { DIFF_FORMATS, runDiff, type DiffFormat } from './commands/diff.js';
 import { runInit } from './commands/init.js';
 import { runInstallBrowser } from './commands/install-browser.js';
 import { REPORT_FORMATS, runReport, type ReportFormat } from './commands/report.js';
 import { DEFAULT_PROFILE_URL } from './config/schema.js';
-import { runScan, type CommandContext } from './commands/scan.js';
-import type { IntegrityMethod, IntegrityPolicy, Scope, ScriptCategory } from './types.js';
+import { runScan } from './commands/scan.js';
+import type { CommandContext } from './commands/context.js';
+import {
+  APPROVABLE_SCOPES,
+  INTEGRITY_METHODS,
+  INTEGRITY_POLICIES,
+  SCRIPT_CATEGORIES,
+  type IntegrityMethod,
+  type IntegrityPolicy,
+  type Scope,
+  type ScriptCategory,
+} from './types.js';
 
 export interface CliIo {
   stdout: (text: string) => void;

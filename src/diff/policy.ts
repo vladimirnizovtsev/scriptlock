@@ -9,7 +9,8 @@
  * Limitation: the scope dimension only distinguishes merchant from every
  * other scope, which is all the v1 matrix needs.
  */
-import type { DiffEventType, DiffMode, HeaderPolicy, IntegrityPolicy, Scope, Severity } from '../types.js';
+import { renderColumns } from '../report/text.js';
+import { INTEGRITY_POLICIES, type DiffEventType, type DiffMode, type HeaderPolicy, type IntegrityPolicy, type Scope, type Severity } from '../types.js';
 
 /** A matrix cell: a severity, or `none` when the event is not emitted. */
 export type PolicySeverity = Severity | 'none';
@@ -35,7 +36,7 @@ export const DIFF_EVENT_TYPES: readonly DiffEventType[] = [
   'removed-frame',
 ];
 
-export function scopeClassOf(scope: Scope | undefined): ScopeClass {
+function scopeClassOf(scope: Scope | undefined): ScopeClass {
   return scope === 'merchant' ? 'merchant' : 'other';
 }
 
@@ -95,7 +96,6 @@ export const HEADER_SEVERITY: Record<DiffMode, Record<HeaderPolicy, PolicySeveri
   drift: { strict: 'fail', track: 'info', ignore: 'none' },
 };
 
-const INTEGRITY_POLICIES: readonly IntegrityPolicy[] = ['strict', 'structural', 'track', 'url-only'];
 const HEADER_POLICIES: readonly HeaderPolicy[] = ['strict', 'track', 'ignore'];
 
 function isIntegrityPolicy(value: unknown): value is IntegrityPolicy {
@@ -106,7 +106,7 @@ function isHeaderPolicy(value: unknown): value is HeaderPolicy {
   return typeof value === 'string' && (HEADER_POLICIES as readonly string[]).includes(value);
 }
 
-export function isHeaderEvent(type: DiffEventType): boolean {
+function isHeaderEvent(type: DiffEventType): boolean {
   return type === 'header-changed' || type === 'header-added' || type === 'header-removed';
 }
 
@@ -185,19 +185,10 @@ function cell(value: PolicySeverity): string {
   return value === 'none' ? 'not emitted' : value;
 }
 
-function pad(text: string, width: number): string {
-  return text.length >= width ? text : text + ' '.repeat(width - text.length);
-}
-
 /** Plain-text table of the matrix for `--help`. */
 export function renderPolicyTable(): string {
-  const rows = policyRows();
-  const header = ['event', 'condition', 'gate', 'drift'];
-  const table = rows.map((row) => [row.type, row.condition, cell(row.gate), cell(row.drift)]);
-  const widths = header.map((h, i) => Math.max(h.length, ...table.map((r) => (r[i] ?? '').length)));
-  const line = (cells: string[]): string =>
-    cells.map((c, i) => (i === cells.length - 1 ? c : pad(c, widths[i] ?? c.length))).join('  ');
-  const out = [line(header), ...table.map(line)];
+  const rows = policyRows().map((row) => [row.type, row.condition, cell(row.gate), cell(row.drift)]);
+  const out = renderColumns(['event', 'condition', 'gate', 'drift'], rows, '');
   out.push('');
   out.push('exit code: 2 when blocked, 1 when any event is fail, 0 otherwise.');
   out.push('gate is meant for deploy pipelines; drift for the scheduled run (broader).');

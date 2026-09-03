@@ -60,6 +60,12 @@ export const BUILTIN_THREEDS_HOSTS: readonly string[] = [
   '*.gpayments.com',
 ];
 
+/**
+ * Compiled host globs. A plain unbounded Map is enough here, unlike the
+ * manifest matcher's WeakMap: the glob set is the two built-in lists plus
+ * `scope.tpsp` / `scope.threeds` from the configuration, so it is bounded by
+ * the configuration and cannot grow with the pages scanned.
+ */
 const matcherCache = new Map<string, (host: string) => boolean>();
 
 function matcher(glob: string): (host: string) => boolean {

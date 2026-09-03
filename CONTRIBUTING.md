@@ -18,7 +18,7 @@ Useful commands:
 | Command | What it does |
 |---|---|
 | `npm run dev -- scan` | Run the CLI from source with tsx (`npm run dev -- <command> [flags]`) |
-| `npm run typecheck` | `tsc --noEmit` over `src/` |
+| `npm run typecheck` | `tsc --noEmit` over `src/`, then over `src/` + `test/` + `fixtures/` (`tsconfig.test.json`) |
 | `npm test` | All vitest projects: `unit` and `e2e` |
 | `npx vitest run --project unit` | Unit tests only (pure functions, no network, no browser) |
 | `npm run test:e2e` | E2E tests only, against the fixture server in `fixtures/` with a real Chromium |
@@ -76,14 +76,14 @@ Releasing the GitHub Action is a git tag, not an npm publish. The runner reads `
 3. Tag the exact version and push it, then publish a GitHub release for that tag:
 
    ```sh
-   git tag -a v0.3.0 -m "v0.3.0" && git push origin v0.3.0
+   git tag -a v0.4.0 -m "v0.4.0" && git push origin v0.4.0
    ```
 
 4. Advance the moving tags, so a workflow that pinned a tag rather than a SHA can receive the fix at all. `v0.1` tracks the latest patch of the 0.1 line and `v0` tracks the latest 0.x release; before 1.0 a minor may break, so say so in the changelog when `v0` crosses one.
 
    ```sh
-   git tag -f v0.3 v0.3.0 && git push -f origin v0.2
-   git tag -f v0   v0.3.0 && git push -f origin v0
+   git tag -f v0.4 v0.4.0 && git push -f origin v0.3
+   git tag -f v0   v0.4.0 && git push -f origin v0
    ```
 
 5. `npm publish` for the CLI. When the release is action-only, say so in the changelog entry: users must change their `uses:` ref, and bumping the `version:` input changes nothing.

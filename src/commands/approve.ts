@@ -37,7 +37,12 @@ import {
 } from '../manifest/approve.js';
 import { emptyManifest, readManifest, writeManifest } from '../manifest/io.js';
 import {
+  APPROVABLE_SCOPES,
+  INTEGRITY_METHODS,
+  INTEGRITY_POLICIES,
+  SCRIPT_CATEGORIES,
   SECURITY_HEADER_NAMES,
+  type IntegrityDefaults,
   type IntegrityMethod,
   type IntegrityPolicy,
   type Manifest,
@@ -47,26 +52,8 @@ import {
   type SecurityHeaders,
   type Snapshot,
 } from '../types.js';
-import { lastSnapshotPath, loadProfile, plural, readSnapshot, type CommandContext } from './scan.js';
-
-export const SCRIPT_CATEGORIES: readonly ScriptCategory[] = [
-  'payment',
-  'functional',
-  'framework',
-  'tag-manager',
-  'analytics',
-  'marketing',
-  'advertising',
-  'consent',
-  'customer-success',
-  'security',
-  'ab-testing',
-  'cdn',
-  'other',
-];
-export const INTEGRITY_POLICIES: readonly IntegrityPolicy[] = ['strict', 'structural', 'track', 'url-only'];
-export const INTEGRITY_METHODS: readonly IntegrityMethod[] = ['hash-strict', 'sri', 'csp', 'vendor-attested', 'source-tracked', 'none'];
-export const APPROVABLE_SCOPES: readonly Scope[] = ['merchant', 'tpsp', 'threeds', 'embedded'];
+import { loadProfile, plural, type CommandContext } from './context.js';
+import { lastSnapshotPath, readSnapshot } from './snapshot.js';
 
 export interface ApproveCommandOptions {
   profile: string;
@@ -177,13 +164,30 @@ function assertWorthApproving(snapshot: Snapshot, snapshotPath: string): void {
   );
 }
 
-export async function runApprove(ctx: CommandContext, opts: ApproveCommandOptions): Promise<ApproveCommandResult> {
+/** The flags after the conflict rules have been applied, with their defaults resolved. */
+interface ValidatedApproveOptions {
+  ids: string[];
+  allNew: boolean;
+  refresh: boolean;
+  headers: boolean;
+  replace: boolean;
+  /** Trimmed `--match` glob, or undefined when the flag was absent or blank. */
+  match: string | undefined;
+}
+
+/**
+ * Applies the flag conflict rules of DESIGN.md section 8 and the choice lists,
+ * before anything is read from disk. Throws UNSUPPORTED with a hint naming the
+ * command to run instead.
+ */
+function validateApproveOptions(opts: ApproveCommandOptions): ValidatedApproveOptions {
   const ids = [...(opts.ids ?? [])];
   const allNew = opts.allNew === true;
   const refresh = opts.refresh === true;
   const headers = opts.headers === true;
   const replace = opts.replace === true;
   const match = opts.match !== undefined && opts.match.trim() !== '' ? opts.match.trim() : undefined;
+
   if (ids.length === 0 && !allNew && !refresh && !headers && match === undefined) {
     throw new ScriptlockError('UNSUPPORTED', 'nothing to approve: pass at least one script id, --match, --all-new, --refresh or --headers', {
       exitCode: 2,
@@ -209,33 +213,30 @@ export async function runApprove(ctx: CommandContext, opts: ApproveCommandOption
   assertChoice(opts.integrityMethod, INTEGRITY_METHODS, '--integrity-method');
   assertChoice(opts.scope, APPROVABLE_SCOPES, '--scope');
 
-  const loaded = await loadProfile(ctx, opts.profile);
-  const manifestPath = manifestPathFor(opts.profile, loaded.profile, ctx.cwd);
-  const snapshotPath = opts.snapshot !== undefined ? path.resolve(ctx.cwd, opts.snapshot) : lastSnapshotPath(ctx.cwd, opts.profile);
-  const snapshot = await readSnapshot(snapshotPath);
-  if (snapshot.blocked !== undefined) {
-    throw new ScriptlockError(
-      'SCAN_BLOCKED',
-      `snapshot ${snapshotPath} was recorded behind a bot-management challenge page (${snapshot.blocked.vendor}: ${snapshot.blocked.evidence}); refusing to approve an unreliable inventory`,
-      { exitCode: 2, hint: 'Allowlist the scanner (browser.extraHeaders) and run "scriptlock scan" again' },
-    );
-  }
+  return { ids, allNew, refresh, headers, replace, match };
+}
 
-  let manifest: Manifest;
-  let created = false;
-  try {
-    manifest = await readManifest(manifestPath);
-  } catch (error) {
-    if (!isScriptlockError(error) || error.code !== 'MANIFEST_NOT_FOUND') throw error;
-    assertWorthApproving(snapshot, snapshotPath);
-    manifest = emptyManifest(opts.profile, loaded.profile.url);
-    manifest.headers.values = { ...snapshot.headers };
-    created = true;
-  }
-  const before = manifest;
+/** What one approval changed, as read back by comparing the manifest before and after. */
+interface ApprovalOutcome {
+  manifest: Manifest;
+  created: boolean;
+  approvedBy: string;
+  approvedAt: string;
+  added: string[];
+  updated: string[];
+  refreshed: string[];
+  framesAdded: string[];
+  /** Entries the `--match --replace` run deleted. */
+  removed: string[];
+  headersRecorded: boolean;
+  /** Ids the `--match` glob authorises, with the scope each was observed in. */
+  covered?: { ids: string[]; scopes: Map<string, Scope> };
+  /** Exact-id entries the glob makes redundant. */
+  redundant?: string[];
+}
 
-  const approvedBy = opts.approvedBy !== undefined && opts.approvedBy.trim() !== '' ? opts.approvedBy.trim() : detectApprover(ctx.env ?? process.env, ctx.cwd);
-  const approvedAt = todayUtc();
+/** Builds the approval metadata common to every mode from the flags and the context. */
+function approveMetaFrom(ctx: CommandContext, opts: ApproveCommandOptions, approvedBy: string, approvedAt: string): ApproveMeta {
   const meta: ApproveMeta = { approvedBy, approvedAt };
   if (opts.owner !== undefined) meta.owner = opts.owner;
   if (opts.category !== undefined) meta.category = opts.category;
@@ -244,24 +245,46 @@ export async function runApprove(ctx: CommandContext, opts: ApproveCommandOption
   if (opts.integrityMethod !== undefined) meta.integrityMethod = opts.integrityMethod;
   if (opts.scope !== undefined) meta.scope = opts.scope;
   if (opts.notes !== undefined) meta.notes = opts.notes;
+  return meta;
+}
 
+/**
+ * Applies one approval to the manifest and reports what changed. Exactly one of
+ * `--match`, `--refresh` and the id/`--all-new` path runs; `--headers` applies
+ * on top of any of them.
+ */
+function applyApproval(
+  ctx: CommandContext,
+  opts: ApproveCommandOptions,
+  flags: ValidatedApproveOptions,
+  before: Manifest,
+  snapshot: Snapshot,
+  created: boolean,
+  integrityDefaults: IntegrityDefaults,
+): ApprovalOutcome {
+  const { ids, allNew, refresh, headers, replace, match } = flags;
+  const approvedBy =
+    opts.approvedBy !== undefined && opts.approvedBy.trim() !== '' ? opts.approvedBy.trim() : detectApprover(ctx.env ?? process.env, ctx.cwd);
+  const approvedAt = todayUtc();
+  const meta = approveMetaFrom(ctx, opts, approvedBy, approvedAt);
+
+  let manifest = before;
   let headersRecorded = created;
-  let covered: string[] | undefined;
-  let coveredScopes: Map<string, Scope> | undefined;
+  let covered: ApprovalOutcome['covered'];
   let redundant: string[] | undefined;
+
   if (match !== undefined) {
     redundant = redundantScriptEntries(manifest, match).map((entry) => entry.id);
     manifest = approveMatch(manifest, snapshot, match, meta, { replace });
     const matched = scriptsMatchingGlob(snapshot, match);
-    covered = matched.map((script) => script.id);
-    coveredScopes = new Map(matched.map((script) => [script.id, script.scope]));
+    covered = { ids: matched.map((script) => script.id), scopes: new Map(matched.map((script) => [script.id, script.scope])) };
   } else if (refresh) {
     manifest = refreshTracked(manifest, snapshot);
     const targets = allNew ? [ALL_NEW, ...ids] : ids;
     if (targets.length > 0) manifest = refreshScripts(manifest, snapshot, targets, { approvedBy, approvedAt });
   } else if (ids.length > 0 || allNew) {
     const targets = allNew ? [ALL_NEW, ...ids] : ids;
-    manifest = approveScripts(manifest, snapshot, targets, meta, loaded.config.integrity);
+    manifest = approveScripts(manifest, snapshot, targets, meta, integrityDefaults);
     if (allNew) {
       const frameMeta: ApproveFrameMeta = { approvedBy, approvedAt };
       if (opts.owner !== undefined) frameMeta.owner = opts.owner;
@@ -287,8 +310,8 @@ export async function runApprove(ctx: CommandContext, opts: ApproveCommandOption
     headersRecorded = true;
   }
 
-  await writeManifest(manifestPath, manifest);
-
+  // What changed is read back from the two manifests rather than tracked as the
+  // mutations happen, so the report cannot claim an edit the file does not hold.
   const beforeById = new Map(before.scripts.map((entry) => [entry.id, entry]));
   const added: string[] = [];
   const updated: string[] = [];
@@ -303,6 +326,33 @@ export async function runApprove(ctx: CommandContext, opts: ApproveCommandOption
   const afterIds = new Set(manifest.scripts.map((entry) => entry.id));
   const removed = before.scripts.map((entry) => entry.id).filter((id) => !afterIds.has(id));
 
+  const outcome: ApprovalOutcome = {
+    manifest,
+    created,
+    approvedBy,
+    approvedAt,
+    added,
+    updated,
+    refreshed,
+    framesAdded,
+    removed,
+    headersRecorded,
+  };
+  if (covered !== undefined) outcome.covered = covered;
+  if (redundant !== undefined) outcome.redundant = redundant;
+  return outcome;
+}
+
+/** The human summary `approve` prints: what the manifest now holds, and what one glob entry cost. */
+function renderApproveSummary(
+  outcome: ApprovalOutcome,
+  before: Manifest,
+  manifestPath: string,
+  flags: ValidatedApproveOptions,
+  verbose: boolean,
+): string {
+  const { manifest, created, added, updated, refreshed, framesAdded, removed, headersRecorded } = outcome;
+  const { refresh, replace, match } = flags;
   const unchanged =
     !created &&
     added.length === 0 &&
@@ -311,6 +361,7 @@ export async function runApprove(ctx: CommandContext, opts: ApproveCommandOption
     framesAdded.length === 0 &&
     removed.length === 0 &&
     JSON.stringify(before.headers) === JSON.stringify(manifest.headers);
+
   const lines: string[] = [];
   lines.push(`manifest: ${manifestPath} (${created ? 'created' : unchanged ? 'unchanged' : 'updated'})`);
   if (refresh) {
@@ -324,12 +375,15 @@ export async function runApprove(ctx: CommandContext, opts: ApproveCommandOption
     if (headersRecorded) parts.push(`${plural(Object.keys(manifest.headers.values).length, 'security header')} recorded`);
     lines.push(`  ${parts.join(', ')}`);
   }
-  if (added.length > 0 || updated.length > 0 || (refresh && refreshed.length > 0)) lines.push(`  approved by ${approvedBy} on ${approvedAt}`);
-  const limit = ctx.verbose ? Number.POSITIVE_INFINITY : 25;
+  if (added.length > 0 || updated.length > 0 || (refresh && refreshed.length > 0)) {
+    lines.push(`  approved by ${outcome.approvedBy} on ${outcome.approvedAt}`);
+  }
+
+  const limit = verbose ? Number.POSITIVE_INFINITY : 25;
+  const byId = new Map(manifest.scripts.map((entry) => [entry.id, entry]));
   const listed = (label: string, entries: string[]): void => {
     if (entries.length === 0) return;
     lines.push(`  ${label}:`);
-    const byId = new Map(manifest.scripts.map((entry) => [entry.id, entry]));
     entries.slice(0, limit).forEach((id) => {
       const entry = byId.get(id);
       lines.push(`    ${entry === undefined ? id : describeEntry(entry)}`);
@@ -339,16 +393,21 @@ export async function runApprove(ctx: CommandContext, opts: ApproveCommandOption
   listed('added', added);
   listed('re-approved', updated);
   listed('refreshed', refreshed);
-  if (match !== undefined && covered !== undefined) {
+
+  if (match !== undefined && outcome.covered !== undefined) {
+    const { ids, scopes } = outcome.covered;
     // Never truncated: this one entry is the widest authorisation in the
     // manifest, so the approval record must show everything it covered.
-    lines.push(`  the glob ${match} authorises ${plural(covered.length, 'observed script')}:`);
-    for (const id of covered) lines.push(`    ${id} [${coveredScopes?.get(id) ?? 'unknown'}]`);
+    lines.push(`  the glob ${match} authorises ${plural(ids.length, 'observed script')}:`);
+    for (const id of ids) lines.push(`    ${id} [${scopes.get(id) ?? 'unknown'}]`);
     lines.push('  every script it authorises keeps its own identity and body hash in the inventory');
     lines.push('  this entry authorises anything matching the glob, so the integrity of those bodies comes from your build pipeline, not from scriptlock');
     lines.push('  it also exempts them from spoofed and moved detection, which only fire on scripts with no matching entry');
-    if (redundant !== undefined && redundant.length > 0) {
-      lines.push(`  ${plural(redundant.length, 'existing entry', 'existing entries')} ${replace ? 'removed as redundant' : 'now redundant'}, because the glob authorises the same ids:`);
+    const redundant = outcome.redundant ?? [];
+    if (redundant.length > 0) {
+      lines.push(
+        `  ${plural(redundant.length, 'existing entry', 'existing entries')} ${replace ? 'removed as redundant' : 'now redundant'}, because the glob authorises the same ids:`,
+      );
       for (const id of redundant) lines.push(`    ${id}`);
       if (!replace) {
         lines.push('    every future diff reports them as removed; re-run with --replace to delete them');
@@ -359,25 +418,65 @@ export async function runApprove(ctx: CommandContext, opts: ApproveCommandOption
     lines.push('  frames added:');
     for (const frameMatch of framesAdded.slice(0, limit)) lines.push(`    ${frameMatch}`);
   }
-  ctx.out(lines.join('\n'));
+  return lines.join('\n');
+}
+
+/** Loads the manifest for `manifestPath`, or creates an empty one from the snapshot. */
+async function loadOrCreateManifest(
+  manifestPath: string,
+  profile: string,
+  profileUrl: string,
+  snapshot: Snapshot,
+  snapshotPath: string,
+): Promise<{ manifest: Manifest; created: boolean }> {
+  try {
+    return { manifest: await readManifest(manifestPath), created: false };
+  } catch (error) {
+    if (!isScriptlockError(error) || error.code !== 'MANIFEST_NOT_FOUND') throw error;
+    assertWorthApproving(snapshot, snapshotPath);
+    const manifest = emptyManifest(profile, profileUrl);
+    manifest.headers.values = { ...snapshot.headers };
+    return { manifest, created: true };
+  }
+}
+
+export async function runApprove(ctx: CommandContext, opts: ApproveCommandOptions): Promise<ApproveCommandResult> {
+  const flags = validateApproveOptions(opts);
+
+  const loaded = await loadProfile(ctx, opts.profile);
+  const manifestPath = manifestPathFor(opts.profile, loaded.profile, ctx.cwd);
+  const snapshotPath = opts.snapshot !== undefined ? path.resolve(ctx.cwd, opts.snapshot) : lastSnapshotPath(ctx.cwd, opts.profile);
+  const snapshot = await readSnapshot(snapshotPath);
+  if (snapshot.blocked !== undefined) {
+    throw new ScriptlockError(
+      'SCAN_BLOCKED',
+      `snapshot ${snapshotPath} was recorded behind a bot-management challenge page (${snapshot.blocked.vendor}: ${snapshot.blocked.evidence}); refusing to approve an unreliable inventory`,
+      { exitCode: 2, hint: 'Allowlist the scanner (browser.extraHeaders) and run "scriptlock scan" again' },
+    );
+  }
+
+  const { manifest: before, created } = await loadOrCreateManifest(manifestPath, opts.profile, loaded.profile.url, snapshot, snapshotPath);
+  const outcome = applyApproval(ctx, opts, flags, before, snapshot, created, loaded.config.integrity);
+  await writeManifest(manifestPath, outcome.manifest);
+  ctx.out(renderApproveSummary(outcome, before, manifestPath, flags, ctx.verbose));
 
   const result: ApproveCommandResult = {
-    manifest,
+    manifest: outcome.manifest,
     manifestPath,
     snapshotPath,
-    created,
-    approvedBy,
-    approvedAt,
-    added,
-    updated,
-    framesAdded,
-    refreshed,
-    headersRecorded,
+    created: outcome.created,
+    approvedBy: outcome.approvedBy,
+    approvedAt: outcome.approvedAt,
+    added: outcome.added,
+    updated: outcome.updated,
+    framesAdded: outcome.framesAdded,
+    refreshed: outcome.refreshed,
+    headersRecorded: outcome.headersRecorded,
   };
-  if (covered !== undefined) result.covered = covered;
-  if (redundant !== undefined) {
-    result.redundant = redundant;
-    result.replaced = replace && redundant.length > 0;
+  if (outcome.covered !== undefined) result.covered = outcome.covered.ids;
+  if (outcome.redundant !== undefined) {
+    result.redundant = outcome.redundant;
+    result.replaced = flags.replace && outcome.redundant.length > 0;
   }
   return result;
 }

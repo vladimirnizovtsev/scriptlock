@@ -97,6 +97,22 @@ describe('normalizeUrl: path hash collapsing (rule 3)', () => {
     );
   });
 
+  // DESIGN.md 4.1 rule 3 fixes the alphanumeric hash rule at `[A-Za-z0-9]{16,}`
+  // with at least one digit. Nothing else in the suite sits on either side of
+  // 16, so the boundary could move without a test noticing.
+  it('collapses an alphanumeric token at 16 characters but not at 15', () => {
+    const short = 'aZ3kL9mQ2xP7vR4'; // 15 characters, one digit
+    const long = 'aZ3kL9mQ2xP7vR4t'; // 16 characters, one digit
+    expect(short).toHaveLength(15);
+    expect(long).toHaveLength(16);
+    expect(normalizeUrl(`https://cdn.example.com/${short}/bundle.js`, cfg)).toBe(`https://cdn.example.com/${short}/bundle.js`);
+    expect(normalizeUrl(`https://cdn.example.com/${long}/bundle.js`, cfg)).toBe('https://cdn.example.com/[hash]/bundle.js');
+    // The digit requirement is what keeps long words out, at any length.
+    expect(normalizeUrl('https://cdn.example.com/internationalization/bundle.js', cfg)).toBe(
+      'https://cdn.example.com/internationalization/bundle.js',
+    );
+  });
+
   it('leaves short tokens, version-like tokens and plain words alone', () => {
     expect(normalizeUrl('https://js.stripe.com/v3', cfg)).toBe('https://js.stripe.com/v3');
     expect(normalizeUrl('https://shop.example.com/assets/app.min.js', cfg)).toBe(

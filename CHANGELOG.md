@@ -6,6 +6,32 @@ All notable changes to this project are documented in this file. The format foll
 
 Nothing yet.
 
+## [0.4.0] - 2026-09-03
+
+A code-quality pass, and one change consumers of the library must read: the package used to export 106 symbols and now exports 39. The CLI, the manifest format, the diff and the Action are untouched, so nothing about scanning or its output changed and no manifest needs regenerating. If you only run the CLI, this is a maintenance release.
+
+### Removed
+
+- The library surface is the list in DESIGN.md section 2 plus the types, `ScriptlockError` and the three Zod schemas. Internal helpers that had leaked into `src/index.ts` are no longer exported: every symbol a 0.x package exports is a promise, and 106 of them was a promise the project could not keep while it still moves. If you imported something that is gone, open an issue and say what for; nothing in the repository imported them, which is why they went.
+
+### Fixed
+
+- A snapshot file carrying a response header that is not one of the ten security headers was accepted, although `Snapshot.headers` is typed as `SecurityHeaders` and the diff both compares and prints those values. A hand-edited or foreign `--snapshot` with `set-cookie` in `headers` produced a `header-added set-cookie` fail event whose report printed the cookie into the CI log or the pull request comment. Such a file is now refused by `parseSnapshot`. Snapshots written by `scriptlock scan` were never affected: the collector already filtered to the security headers.
+- A command sent to an out-of-process iframe over CDP could never settle if the target went away between the parent accepting the message and the reply arriving. Nothing rejected those promises on detach or dispose and nothing timed them out, so one torn-down cross-origin iframe could hang the scan for the rest of the run — on the main path, since `diff` awaits the frame refresh. Child commands are now bounded by `browser.timeoutMs` and every pending one is rejected when the target detaches or the capture is disposed.
+- `CONTRIBUTING.md`'s release runbook created tag `v0.3` and then force-pushed `v0.2`. Following it left tag-pinned Action consumers on the old ref and force-moved a tag the release never touched. A new guard in `test/unit/docs.test.ts` parses the runbook's shell blocks and fails when a pushed tag is not one the same block created, or when the tagged version is not the one in `package.json`.
+
+### Changed
+
+- The public API (`src/index.ts`) is now exactly the list in DESIGN.md section 2 plus the shared types, `ScriptlockError` and the three Zod schemas. It previously re-exported roughly 180 symbols — command plumbing, package-manager detection, internal helpers — each of which was a rename hazard under semver, justified by a comment claiming the CLI and the tests imported this module. Neither did; both use deep imports, and still do. The CLI is unaffected.
+- `npm run typecheck` now also typechecks `test/` and `fixtures/` through a new `tsconfig.test.json`. Those 4,800 lines were excluded from the only typechecking the project ran, and three type errors were live in them — including an unguarded `inline?.structuralHash.slice(...)` in the cross-origin-iframe e2e test that would have thrown a `TypeError` instead of failing an assertion.
+- The runtime lists behind `ScriptKind`, `Scope`, `IntegrityPolicy`, `IntegrityMethod`, `ScriptCategory` and `SecurityHeaderName` live in `src/types.ts` and the unions are derived from them, the way `SECURITY_HEADER_NAMES` already was. The hand-written copies in the config schema, the manifest schema, the CLI choice lists and the report orderings are gone: adding a member used to compile clean while both validators silently rejected it.
+- `commands/scan.ts` no longer doubles as the shared command runtime. `CommandContext` and profile resolution moved to `commands/context.ts`, the snapshot file layer to `commands/snapshot.ts`, and the inventory model shared by the markdown and JSON reports to `report/inventory.ts` — the two had already drifted on how they group by owner and category. `errors.ts` and the new modules are in the DESIGN.md module map, which claims to list every file and did not list `errors.ts`.
+- DESIGN.md section 3.2 described attaching to out-of-process iframes with `newCDPSession(frame)` on `frameattached`. The collector uses non-flattened `Target.setAutoAttach` with `waitForDebuggerOnStart`, which catches those frames before they run; the documented approach races the frame's first scripts. The contract now describes what the code does and why the alternative was rejected. A new section 4.4 documents the `wasm` and `unknown` kinds, which had their own identity rule, hash function and integrity path and appeared nowhere in the contract.
+
+### Added
+
+- Tests for four behaviours that had none: a script authorised only by a hashless `--match` glob stays silent (the clause that makes `approve --match` usable at all could be deleted with every test still green), the identity-collision warning of DESIGN.md 4.1 rule 3 (with two colliding chunks in the fixture site behind `?collide=1`), the 16-character boundary of the alphanumeric hash-token rule, and `bodyNotCaptured` for a script that is not a worker.
+
 ## [0.3.0] - 2026-09-03
 
 Installation, and the commands Scriptlock prints for you to run. Nothing about the scan, the identity model, the diff matrix or the manifest format changed, and no manifest needs regenerating. If Scriptlock is already installed and scanning, there is nothing here to upgrade for; this release exists so that a fresh install under pnpm or yarn reads instructions that work, and so that a reader who gets stuck is handed a command that runs.
@@ -125,7 +151,8 @@ First release.
 - Fixture site and server for e2e tests; unit tests for every rule in the design.
 - Documentation: README with limits, requirement mapping, evidence guidance and comparison; CONTRIBUTING, SECURITY.
 
-[Unreleased]: https://github.com/vladimirnizovtsev/scriptlock/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/vladimirnizovtsev/scriptlock/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/vladimirnizovtsev/scriptlock/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/vladimirnizovtsev/scriptlock/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/vladimirnizovtsev/scriptlock/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/vladimirnizovtsev/scriptlock/compare/v0.1.0...v0.2.0

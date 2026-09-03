@@ -8,7 +8,14 @@ import type { Manifest, ManifestScript } from '../../../src/types.js';
 
 const CSP = "default-src 'self'; script-src 'self' https://js.stripe.com https://www.googletagmanager.com 'nonce-abc123' 'strict-dynamic'; frame-src https://js.stripe.com https://hooks.stripe.com; connect-src 'self' https://api.stripe.com; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'";
 
-function script(overrides: Partial<ManifestScript> & Pick<ManifestScript, 'id'>): ManifestScript {
+/**
+ * Overrides may carry an explicit `undefined` to *remove* an optional field
+ * from the factory output, which `exactOptionalPropertyTypes` forbids on a
+ * plain `Partial<T>`. Same shape as test/unit/diff/helpers.ts.
+ */
+type Overrides<T> = { [K in keyof T]?: T[K] | undefined };
+
+function script(overrides: Overrides<ManifestScript> & Pick<ManifestScript, 'id'>): ManifestScript {
   return {
     kind: 'external',
     scope: 'merchant',
@@ -21,7 +28,7 @@ function script(overrides: Partial<ManifestScript> & Pick<ManifestScript, 'id'>)
     approvedBy: 'v.nizovtsev',
     approvedAt: '2026-09-02',
     ...overrides,
-  };
+  } as ManifestScript;
 }
 
 function sample(): Manifest {

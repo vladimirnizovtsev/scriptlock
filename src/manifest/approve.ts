@@ -94,7 +94,7 @@ function mainOriginOf(snapshot: Snapshot): string | undefined {
   }
 }
 
-export function defaultIntegrityMethod(policy: IntegrityPolicy): IntegrityMethod {
+function defaultIntegrityMethod(policy: IntegrityPolicy): IntegrityMethod {
   return policy === 'strict' || policy === 'structural' ? 'hash-strict' : 'source-tracked';
 }
 
@@ -144,18 +144,19 @@ function assertNotPlaceholder(subject: string, field: string, value: string): vo
 }
 
 function requireMeta(id: string, meta: ApproveMeta): { owner: string; category: ScriptCategory; justification: string } {
+  const { owner, category, justification } = meta;
   const missing: string[] = [];
-  if (meta.owner === undefined || meta.owner === '') missing.push('owner');
-  if (meta.category === undefined) missing.push('category');
-  if (meta.justification === undefined || meta.justification === '') missing.push('justification');
-  if (missing.length > 0) {
+  if (owner === undefined || owner === '') missing.push('owner');
+  if (category === undefined) missing.push('category');
+  if (justification === undefined || justification === '') missing.push('justification');
+  if (owner === undefined || category === undefined || justification === undefined || missing.length > 0) {
     throw new ScriptlockError('UNSUPPORTED', `Approving new script ${id} requires ${missing.join(', ')}`, {
       hint: 'Pass --owner, --category and --justification',
     });
   }
-  assertNotPlaceholder(id, 'owner', meta.owner as string);
-  assertNotPlaceholder(id, 'justification', meta.justification as string);
-  return { owner: meta.owner as string, category: meta.category as ScriptCategory, justification: meta.justification as string };
+  assertNotPlaceholder(id, 'owner', owner);
+  assertNotPlaceholder(id, 'justification', justification);
+  return { owner, category, justification };
 }
 
 function resolveScriptIds(manifest: Manifest, snapshot: Snapshot, ids: readonly string[]): ObservedScript[] {
@@ -229,11 +230,9 @@ function updatedScriptEntry(existing: ManifestScript, observed: ObservedScript, 
   const integrityMethod = notCaptured
     ? (meta.integrityMethod ?? 'none')
     : (meta.integrityMethod ?? (meta.integrity !== undefined && meta.integrity !== existing.integrity ? defaultIntegrityMethod(integrity) : existing.integrityMethod));
-  const { lastSeenSha256: _dropped, sha256: _sha, structuralHash: _struct, notes: _notes, ...rest } = existing;
-  void _dropped;
-  void _sha;
-  void _struct;
-  void _notes;
+  // Rebuilt from `rest` so the hashes and notes below are the only ones set:
+  // a stale lastSeenSha256 must not survive a re-approval.
+  const { lastSeenSha256: _lastSeen, sha256: _sha, structuralHash: _struct, notes: _notes, ...rest } = existing;
   const entry: ManifestScript = {
     ...rest,
     kind: observed.kind,
@@ -294,7 +293,7 @@ export function approveScripts(
 // ---------------------------------------------------------------------------
 
 /** Integrity of a glob entry when neither the flag nor an existing entry says otherwise. */
-export const GLOB_INTEGRITY: IntegrityPolicy = 'track';
+const GLOB_INTEGRITY: IntegrityPolicy = 'track';
 
 /**
  * Observed scripts (harness excluded, deduplicated by id, in snapshot order)
@@ -427,12 +426,19 @@ export function approveMatch(
   }
 
   const scopes = coveredScopes(covered);
+  // `covered` is non-empty (checked above), so it contributed at least one scope.
+  const [primaryScope] = scopes;
+  if (primaryScope === undefined) {
+    throw new ScriptlockError('SNAPSHOT_INVALID', `Glob ${glob} matched scripts with no scope`, {
+      hint: 'Re-run "scriptlock scan" and approve from the fresh snapshot',
+    });
+  }
   if (meta.scope === undefined && scopes.length > 1) {
     throw new ScriptlockError(
       'UNSUPPORTED',
       `The glob ${glob} matches scripts in ${scopes.length} scopes (${scopes.join(', ')}) and one entry records one scope, so it would authorise scripts outside the scope it names`,
       {
-        hint: `Narrow the glob, or name the scope the entry stands for with --scope ${scopes[0] as string} (the glob still authorises the scripts in the other scopes, and each is reported as scope-changed)`,
+        hint: `Narrow the glob, or name the scope the entry stands for with --scope ${primaryScope} (the glob still authorises the scripts in the other scopes, and each is reported as scope-changed)`,
       },
     );
   }
@@ -457,7 +463,7 @@ export function approveMatch(
     id: existing?.id ?? glob,
     match: glob,
     kind: commonKind(covered),
-    scope: meta.scope ?? (scopes[0] as Scope),
+    scope: meta.scope ?? primaryScope,
     integrity,
     integrityMethod,
     owner: required.owner,
@@ -495,17 +501,9 @@ function resolveFrames(manifest: Manifest, snapshot: Snapshot, matches: readonly
   return [...selected.values()];
 }
 
+/** The first frame whose URL matches `glob` under the manifest matching rules. */
 function findFrameByGlob(frames: readonly FrameInfo[], glob: string): FrameInfo | undefined {
-  const probe: Manifest = {
-    version: 1,
-    profile: '',
-    url: '',
-    headers: { policy: 'ignore', values: {} },
-    frames: [{ match: glob, scope: 'embedded', owner: '', justification: '', approvedBy: '', approvedAt: '' }],
-    scripts: [],
-    ignore: [],
-  };
-  return frames.find((frame) => findFrameEntry(probe, frame) !== undefined);
+  return frames.find((frame) => globMatches(glob, frame.url));
 }
 
 /**
@@ -526,10 +524,11 @@ export function approveFrames(manifest: Manifest, snapshot: Snapshot, matches: r
     const index = frames.findIndex((entry) => entry.match === match);
     const existing = index === -1 ? undefined : frames[index];
     if (existing === undefined) {
+      const { owner, justification } = meta;
       const missing: string[] = [];
-      if (meta.owner === undefined || meta.owner === '') missing.push('owner');
-      if (meta.justification === undefined || meta.justification === '') missing.push('justification');
-      if (missing.length > 0) {
+      if (owner === undefined || owner === '') missing.push('owner');
+      if (justification === undefined || justification === '') missing.push('justification');
+      if (owner === undefined || justification === undefined || missing.length > 0) {
         throw new ScriptlockError('UNSUPPORTED', `Approving new frame ${match} requires ${missing.join(', ')}`, {
           hint: 'Pass --owner and --justification',
         });
@@ -537,8 +536,8 @@ export function approveFrames(manifest: Manifest, snapshot: Snapshot, matches: r
       const entry: ManifestFrame = {
         match,
         scope: meta.scope ?? frame.scope,
-        owner: meta.owner as string,
-        justification: meta.justification as string,
+        owner,
+        justification,
         approvedBy: meta.approvedBy,
         approvedAt: meta.approvedAt,
       };
@@ -578,8 +577,7 @@ export function refreshTracked(manifest: Manifest, snapshot: Snapshot): Manifest
     if (observed.sha256 === undefined) return entry; // body not captured: nothing to track
     if (entry.sha256 === observed.sha256) {
       if (entry.lastSeenSha256 === undefined) return entry;
-      const { lastSeenSha256: _dropped, ...rest } = entry;
-      void _dropped;
+      const { lastSeenSha256: _lastSeen, ...rest } = entry;
       return rest;
     }
     if (entry.lastSeenSha256 === observed.sha256) return entry;
@@ -627,11 +625,9 @@ export function refreshScripts(
   }
   const scripts = manifest.scripts.map((entry) => {
     if (!targets.has(entry) || isUnpinnedGlobEntry(entry)) return entry;
-    const observed = observedFor.get(entry) as ObservedScript;
-    const { lastSeenSha256: _dropped, sha256: _sha, structuralHash: _struct, ...rest } = entry;
-    void _dropped;
-    void _sha;
-    void _struct;
+    const observed = observedFor.get(entry);
+    if (observed === undefined) return entry;
+    const { lastSeenSha256: _lastSeen, sha256: _sha, structuralHash: _struct, ...rest } = entry;
     const next: ManifestScript = { ...rest };
     if (observed.sha256 !== undefined) next.sha256 = observed.sha256;
     if (observed.structuralHash !== undefined) next.structuralHash = observed.structuralHash;

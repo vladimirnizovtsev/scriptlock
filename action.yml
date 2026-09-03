@@ -65,7 +65,7 @@ inputs:
       produced by the same code; "latest" is accepted but is not reproducible, and the value
       is an npm spec, so a git URL or a tarball URL here installs arbitrary code.
     required: false
-    default: "0.3.0"
+    default: "0.4.0"
   history:
     description: >-
       Also write the snapshot and diff under .scriptlock/history/<profile>/ (true or false).

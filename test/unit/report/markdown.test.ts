@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { diff } from '../../../src/diff/diff.js';
-import { inventoryStatus, renderInventoryMarkdown, renderMarkdown } from '../../../src/report/markdown.js';
+import { inventoryStatus } from '../../../src/report/inventory.js';
+import { renderInventoryMarkdown, renderMarkdown } from '../../../src/report/markdown.js';
 
 function balancedBackticks(md: string): void {
   for (const line of md.split('\n')) {

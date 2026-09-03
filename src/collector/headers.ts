@@ -9,10 +9,10 @@
  * value is kept as delivered. Headers are read from `Network.responseReceived`,
  * which for cached responses reflects the cached headers.
  */
-import { SECURITY_HEADER_NAMES, type ObservedScript, type SecurityHeaderName, type SecurityHeaders } from '../types.js';
+import { SECURITY_HEADER_NAMES, type ObservedScript, type SecurityHeaders } from '../types.js';
 
 /** Returns a copy of the header map with lower-cased names. Later duplicates win. */
-export function lowerCaseHeaders(headers: Record<string, string>): Record<string, string> {
+function lowerCaseHeaders(headers: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [name, value] of Object.entries(headers)) out[name.toLowerCase()] = value;
   return out;
@@ -24,7 +24,7 @@ export function extractSecurityHeaders(headers: Record<string, string>): Securit
   const out: SecurityHeaders = {};
   for (const name of SECURITY_HEADER_NAMES) {
     const value = lower[name];
-    if (value !== undefined) out[name as SecurityHeaderName] = value;
+    if (value !== undefined) out[name] = value;
   }
   return out;
 }

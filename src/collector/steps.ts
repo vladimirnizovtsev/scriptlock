@@ -18,7 +18,7 @@
 import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { Page } from 'playwright-core';
-import { ScriptlockError } from '../errors.js';
+import { errorMessage, ScriptlockError } from '../errors.js';
 import { addDevDependencyCommand } from '../runner.js';
 import type { FlowStep, WaitUntil } from '../types.js';
 
@@ -35,7 +35,7 @@ export interface StepContext {
 export type FlowModule = (page: Page) => Promise<void> | void;
 
 /** Label for progress and error messages. The value of a `fill` step is never printed: it may be a secret from `${VAR}`. */
-export function stepLabel(step: FlowStep): string {
+function stepLabel(step: FlowStep): string {
   if ('fill' in step) return `fill: ${step.fill.selector}`;
   const key = Object.keys(step)[0] ?? '?';
   const value = (step as Record<string, unknown>)[key];
@@ -118,7 +118,7 @@ async function runStep(page: Page, step: FlowStep, ctx: StepContext): Promise<vo
 }
 
 /** Loads a flow module and returns its default export. */
-export async function loadFlowModule(modulePath: string, cwd: string): Promise<FlowModule> {
+async function loadFlowModule(modulePath: string, cwd: string): Promise<FlowModule> {
   const absolute = isAbsolute(modulePath) ? modulePath : resolve(cwd, modulePath);
   const href = pathToFileURL(absolute).href;
   let loaded: unknown;
@@ -171,6 +171,3 @@ async function importWithTsx(href: string, modulePath: string): Promise<unknown>
   }
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message.split('\n')[0] ?? error.message : String(error);
-}

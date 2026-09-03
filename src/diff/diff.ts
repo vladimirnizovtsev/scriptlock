@@ -22,7 +22,7 @@ import {
   coveringScriptEntries,
   escapeGlob,
   findFrameEntry,
-  findScriptEntryById,
+  findScriptEntry,
   globMatches,
   isIgnored,
   isNarrowGlob,
@@ -32,9 +32,11 @@ import {
   SECURITY_HEADER_NAMES,
   type DiffEvent,
   type DiffEventType,
+  type DiffMode,
   type DiffOptions,
   type DiffResult,
   type IdentityConfig,
+  type Manifest,
   type ManifestFrame,
   type ManifestScript,
   type ObservedScript,
@@ -85,7 +87,7 @@ interface EventExtra {
 const DEFAULT_IDENTITY: IdentityConfig = { stripQuery: [], keepQuery: [], collapseHashes: true };
 
 /** Hash prefix used in event messages; before/after keep the full value. */
-export function shortHash(value: string | undefined): string {
+function shortHash(value: string | undefined): string {
   if (value === undefined || value === '') return '(none)';
   return value.length > 12 ? value.slice(0, 12) : value;
 }
@@ -193,6 +195,129 @@ export function bundleHints(events: readonly DiffEvent[], context: HintContext =
   return hints;
 }
 
+/**
+ * Builds a DiffEvent, or undefined when the severity matrix says this event is
+ * not emitted at all. Optional fields are omitted rather than set to undefined.
+ */
+function buildEvent(type: DiffEventType, severity: PolicySeverity, subject: string, message: string, extra: EventExtra = {}): DiffEvent | undefined {
+  if (severity === 'none') return undefined;
+  const built: DiffEvent = { type, severity, subject, message };
+  if (extra.scope !== undefined) built.scope = extra.scope;
+  if (extra.observed !== undefined) built.observed = extra.observed;
+  if (extra.expected !== undefined) built.expected = extra.expected;
+  if (extra.before !== undefined) built.before = extra.before;
+  if (extra.after !== undefined) built.after = extra.after;
+  return built;
+}
+
+// ---------------------------------------------------------------------------
+// Per-script comparisons (step 3 of the pipeline in `diff`)
+//
+// Each returns the event it found, or undefined; the caller pushes it. Keeping
+// them at module scope leaves the numbered steps inside `diff` contiguous, and
+// makes each one testable on its own.
+// ---------------------------------------------------------------------------
+
+/**
+ * The `changed` event for one script against the entry that authorises it, or
+ * undefined when the policy does not compare bodies, the body was never
+ * captured, or the body still matches.
+ */
+function compareBody(script: ObservedScript, entry: ManifestScript, mode: DiffMode): DiffEvent | undefined {
+  const severity = severityFor(mode, 'changed', script.scope, entry.integrity);
+  if (severity === 'none') return undefined;
+  switch (entry.integrity) {
+    case 'strict': {
+      if (entry.sha256 === undefined || script.sha256 === undefined || entry.sha256 === script.sha256) return undefined;
+      return buildEvent('changed', severity, script.id, `sha256 changed under strict policy: ${shortHash(entry.sha256)} -> ${shortHash(script.sha256)}`, {
+        scope: script.scope,
+        observed: script,
+        expected: entry,
+        before: entry.sha256,
+        after: script.sha256,
+      });
+    }
+    case 'structural': {
+      if (entry.structuralHash === undefined || script.structuralHash === undefined || entry.structuralHash === script.structuralHash) {
+        return undefined;
+      }
+      return buildEvent(
+        'changed',
+        severity,
+        script.id,
+        `structural hash changed under structural policy: ${shortHash(entry.structuralHash)} -> ${shortHash(script.structuralHash)}`,
+        { scope: script.scope, observed: script, expected: entry, before: entry.structuralHash, after: script.structuralHash },
+      );
+    }
+    case 'track': {
+      if (script.sha256 === undefined) return undefined;
+      const known = [entry.sha256, entry.lastSeenSha256].filter((h): h is string => h !== undefined && h !== '');
+      // An entry with no approved hash is a `match` glob entry, which stands for
+      // many bodies and pins none of them (DESIGN.md section 6). Without this it
+      // would report every script it covers as changed on every run.
+      if (known.length === 0 || known.includes(script.sha256)) return undefined;
+      const before = entry.lastSeenSha256 ?? entry.sha256;
+      return buildEvent(
+        'changed',
+        severity,
+        script.id,
+        `body changed under track policy (informational): ${shortHash(before)} -> ${shortHash(script.sha256)}`,
+        { scope: script.scope, observed: script, expected: entry, before, after: script.sha256 },
+      );
+    }
+    case 'url-only':
+      return undefined;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * The `spoofed` event for a script whose claimed `sourceURL` resolves to a
+ * manifest entry while its real id has none.
+ */
+function detectSpoof(script: ObservedScript, manifest: Manifest, mode: DiffMode, normalize: NormalizeUrlFn, identity: IdentityConfig): DiffEvent | undefined {
+  if (!script.hasSourceURL || !script.sourceUrl) return undefined;
+  const claimed = script.sourceUrl;
+  let normalised: string | undefined;
+  try {
+    normalised = normalize(claimed, identity);
+  } catch {
+    normalised = undefined;
+  }
+  const candidates = [normalised, claimed].filter((c): c is string => c !== undefined && c !== '');
+  for (const candidate of candidates) {
+    if (candidate === script.id) continue;
+    const target = findScriptEntry(manifest, candidate);
+    if (!target) continue;
+    return buildEvent(
+      'spoofed',
+      severityFor(mode, 'spoofed', script.scope),
+      script.id,
+      `script claims sourceURL ${claimed} which matches approved entry ${target.id}, but its real id has no manifest entry`,
+      { scope: script.scope, observed: script, expected: target, before: target.id, after: script.id },
+    );
+  }
+  return undefined;
+}
+
+/**
+ * The `moved` event for a script whose body equals an approved strict or
+ * structural entry's hash but which was observed under a different id.
+ */
+function detectMoved(script: ObservedScript, approvedHashes: ReadonlyMap<string, ManifestScript>, mode: DiffMode): DiffEvent | undefined {
+  if (script.sha256 === undefined) return undefined; // no body hash: nothing can have moved
+  const original = approvedHashes.get(script.sha256);
+  if (!original || original.id === script.id) return undefined;
+  return buildEvent(
+    'moved',
+    severityFor(mode, 'moved', script.scope),
+    script.id,
+    `body matches approved ${original.integrity} entry ${original.id} but was observed from a different source`,
+    { scope: script.scope, observed: script, expected: original, before: original.id, after: script.id },
+  );
+}
+
 export function diff(options: DiffOptions & DiffExtras): DiffResult {
   const { snapshot, manifest, mode } = options;
   const normalize = options.normalizeUrl ?? realNormalizeUrl;
@@ -200,21 +325,15 @@ export function diff(options: DiffOptions & DiffExtras): DiffResult {
   const events: DiffEvent[] = [];
   const warnings: string[] = [];
 
-  const push = (
-    type: DiffEventType,
-    severity: PolicySeverity,
-    subject: string,
-    message: string,
-    extra: EventExtra = {},
-  ): void => {
-    if (severity === 'none') return;
-    const event: DiffEvent = { type, severity, subject, message };
-    if (extra.scope !== undefined) event.scope = extra.scope;
-    if (extra.observed !== undefined) event.observed = extra.observed;
-    if (extra.expected !== undefined) event.expected = extra.expected;
-    if (extra.before !== undefined) event.before = extra.before;
-    if (extra.after !== undefined) event.after = extra.after;
-    events.push(event);
+  const push = (type: DiffEventType, severity: PolicySeverity, subject: string, message: string, extra: EventExtra = {}): void => {
+    pushEvent(buildEvent(type, severity, subject, message, extra));
+  };
+
+  /** Appends an event a helper produced and reports whether there was one. */
+  const pushEvent = (found: DiffEvent | undefined): boolean => {
+    if (found === undefined) return false;
+    events.push(found);
+    return true;
   };
 
   // 1. blocked
@@ -276,12 +395,12 @@ export function diff(options: DiffOptions & DiffExtras): DiffResult {
           { scope: script.scope, observed: script, expected: entry, before: entry.scope, after: script.scope },
         );
       }
-      compareBody(script, entry);
+      pushEvent(compareBody(script, entry, mode));
       continue;
     }
 
-    if (detectSpoof(script)) continue;
-    if (detectMoved(script)) continue;
+    if (pushEvent(detectSpoof(script, manifest, mode, normalize, identity))) continue;
+    if (pushEvent(detectMoved(script, approvedHashes, mode))) continue;
 
     const entity = script.entity ? ` (${script.entity.name})` : '';
     const loadedBy = script.loadedBy ? `, loaded by ${script.loadedBy}` : '';
@@ -292,103 +411,6 @@ export function diff(options: DiffOptions & DiffExtras): DiffResult {
       `unapproved ${script.kind} script in ${script.scope} scope${entity}${loadedBy}`,
       { scope: script.scope, observed: script },
     );
-  }
-
-  function compareBody(script: ObservedScript, entry: ManifestScript): void {
-    const severity = severityFor(mode, 'changed', script.scope, entry.integrity);
-    if (severity === 'none') return;
-    // A body that was never captured (worker entries) has nothing to compare.
-    if (script.sha256 === undefined && script.structuralHash === undefined) return;
-    switch (entry.integrity) {
-      case 'strict': {
-        if (entry.sha256 !== undefined && script.sha256 !== undefined && entry.sha256 !== script.sha256) {
-          push(
-            'changed',
-            severity,
-            script.id,
-            `sha256 changed under strict policy: ${shortHash(entry.sha256)} -> ${shortHash(script.sha256)}`,
-            { scope: script.scope, observed: script, expected: entry, before: entry.sha256, after: script.sha256 },
-          );
-        }
-        return;
-      }
-      case 'structural': {
-        if (entry.structuralHash !== undefined && script.structuralHash !== undefined && entry.structuralHash !== script.structuralHash) {
-          push(
-            'changed',
-            severity,
-            script.id,
-            `structural hash changed under structural policy: ${shortHash(entry.structuralHash)} -> ${shortHash(script.structuralHash)}`,
-            {
-              scope: script.scope,
-              observed: script,
-              expected: entry,
-              before: entry.structuralHash,
-              after: script.structuralHash,
-            },
-          );
-        }
-        return;
-      }
-      case 'track': {
-        if (script.sha256 === undefined) return;
-        const known = [entry.sha256, entry.lastSeenSha256].filter((h): h is string => h !== undefined && h !== '');
-        if (known.length === 0 || known.includes(script.sha256)) return;
-        const before = entry.lastSeenSha256 ?? entry.sha256;
-        push(
-          'changed',
-          severity,
-          script.id,
-          `body changed under track policy (informational): ${shortHash(before)} -> ${shortHash(script.sha256)}`,
-          { scope: script.scope, observed: script, expected: entry, before, after: script.sha256 },
-        );
-        return;
-      }
-      case 'url-only':
-        return;
-      default:
-        return;
-    }
-  }
-
-  function detectSpoof(script: ObservedScript): boolean {
-    if (!script.hasSourceURL || !script.sourceUrl) return false;
-    const claimed = script.sourceUrl;
-    let normalised: string | undefined;
-    try {
-      normalised = normalize(claimed, identity);
-    } catch {
-      normalised = undefined;
-    }
-    const candidates = [normalised, claimed].filter((c): c is string => c !== undefined && c !== '');
-    for (const candidate of candidates) {
-      if (candidate === script.id) continue;
-      const target = findScriptEntryById(manifest, candidate);
-      if (!target) continue;
-      push(
-        'spoofed',
-        severityFor(mode, 'spoofed', script.scope),
-        script.id,
-        `script claims sourceURL ${claimed} which matches approved entry ${target.id}, but its real id has no manifest entry`,
-        { scope: script.scope, observed: script, expected: target, before: target.id, after: script.id },
-      );
-      return true;
-    }
-    return false;
-  }
-
-  function detectMoved(script: ObservedScript): boolean {
-    if (script.sha256 === undefined) return false; // no body hash: nothing can have moved
-    const original = approvedHashes.get(script.sha256);
-    if (!original || original.id === script.id) return false;
-    push(
-      'moved',
-      severityFor(mode, 'moved', script.scope),
-      script.id,
-      `body matches approved ${original.integrity} entry ${original.id} but was observed from a different source`,
-      { scope: script.scope, observed: script, expected: original, before: original.id, after: script.id },
-    );
-    return true;
   }
 
   // 4. removed entries
@@ -408,10 +430,10 @@ export function diff(options: DiffOptions & DiffExtras): DiffResult {
   const headerPolicy = manifest.headers.policy;
   if (headerPolicy !== 'ignore') {
     const severity = severityFor(mode, 'header-changed', undefined, headerPolicy);
-    const names = new Set<SecurityHeaderName>(SECURITY_HEADER_NAMES);
-    for (const name of Object.keys(manifest.headers.values) as SecurityHeaderName[]) names.add(name);
-    for (const name of Object.keys(snapshot.headers) as SecurityHeaderName[]) names.add(name);
-    for (const name of names) {
+    // Both sides are validated against SECURITY_HEADER_NAMES on the way in (the
+    // manifest and snapshot schemas, and the collector's own header filter), so
+    // this list is every header either side can hold.
+    for (const name of SECURITY_HEADER_NAMES) {
       const before = manifest.headers.values[name];
       const after = snapshot.headers[name];
       if (before === undefined && after === undefined) continue;

@@ -10,16 +10,25 @@
 // Scripts observed during a scan
 // ---------------------------------------------------------------------------
 
-/** How the script reached the JavaScript engine. */
-export type ScriptKind =
-  | 'external' // <script src> or dynamically inserted <script src>, any origin
-  | 'inline' // <script> block in markup (classic or module)
-  | 'eval' // eval(), new Function(), setTimeout(string), javascript: URLs, any anonymous code compiled without a URL
-  | 'blob' // blob: URL
-  | 'data' // data: URL
-  | 'wasm' // WebAssembly module
-  | 'worker' // dedicated worker or service worker entry script
-  | 'unknown';
+/**
+ * How the script reached the JavaScript engine.
+ *
+ * The array is the source and the union is derived from it, so a new kind is
+ * added in one place and every validator, choice list and display order that
+ * reads the array picks it up (the same pattern as `SECURITY_HEADER_NAMES`).
+ */
+export const SCRIPT_KINDS = [
+  'external', // <script src> or dynamically inserted <script src>, any origin
+  'inline', // <script> block in markup (classic or module)
+  'eval', // eval(), new Function(), setTimeout(string), javascript: URLs, any anonymous code compiled without a URL
+  'blob', // blob: URL
+  'data', // data: URL
+  'wasm', // WebAssembly module
+  'worker', // dedicated worker or service worker entry script
+  'unknown',
+] as const;
+
+export type ScriptKind = (typeof SCRIPT_KINDS)[number];
 
 /**
  * Who is responsible for the script under the PCI SSC responsibility split
@@ -38,7 +47,19 @@ export type ScriptKind =
  * - harness: scripts injected by the automation harness itself (Playwright
  *   utility worlds, page.evaluate). Always dropped from the inventory.
  */
-export type Scope = 'merchant' | 'tpsp' | 'threeds' | 'embedded' | 'harness';
+export const SCOPES = ['merchant', 'tpsp', 'threeds', 'embedded', 'harness'] as const;
+
+export type Scope = (typeof SCOPES)[number];
+
+/**
+ * Every scope but `harness`, in the order reports and the manifest present
+ * them. Harness scripts never reach the inventory (DESIGN.md section 5), so
+ * they can neither be approved nor grouped; deriving the list keeps it from
+ * drifting when a scope is added to `SCOPES`.
+ */
+export const APPROVABLE_SCOPES: readonly Exclude<Scope, 'harness'>[] = SCOPES.filter(
+  (scope): scope is Exclude<Scope, 'harness'> => scope !== 'harness',
+);
 
 export type TargetType = 'page' | 'iframe' | 'worker' | 'service_worker';
 
@@ -150,19 +171,7 @@ export interface ObservedScript {
  * Security-impacting HTTP headers of the main document, lower-case names,
  * raw values. Only headers that were present are set.
  */
-export type SecurityHeaderName =
-  | 'content-security-policy'
-  | 'content-security-policy-report-only'
-  | 'strict-transport-security'
-  | 'x-frame-options'
-  | 'x-content-type-options'
-  | 'referrer-policy'
-  | 'permissions-policy'
-  | 'cross-origin-opener-policy'
-  | 'cross-origin-embedder-policy'
-  | 'cross-origin-resource-policy';
-
-export const SECURITY_HEADER_NAMES: readonly SecurityHeaderName[] = [
+export const SECURITY_HEADER_NAMES = [
   'content-security-policy',
   'content-security-policy-report-only',
   'strict-transport-security',
@@ -173,7 +182,9 @@ export const SECURITY_HEADER_NAMES: readonly SecurityHeaderName[] = [
   'cross-origin-opener-policy',
   'cross-origin-embedder-policy',
   'cross-origin-resource-policy',
-];
+] as const;
+
+export type SecurityHeaderName = (typeof SECURITY_HEADER_NAMES)[number];
 
 export type SecurityHeaders = Partial<Record<SecurityHeaderName, string>>;
 
@@ -235,35 +246,43 @@ export interface Snapshot {
  *   never fail. For evergreen third-party scripts (gtm.js, Stripe.js v3).
  * - url-only: only identity is enforced; body changes are not reported.
  */
-export type IntegrityPolicy = 'strict' | 'structural' | 'track' | 'url-only';
+export const INTEGRITY_POLICIES = ['strict', 'structural', 'track', 'url-only'] as const;
+
+export type IntegrityPolicy = (typeof INTEGRITY_POLICIES)[number];
 
 /**
  * What actually assures the integrity of the script in production. Reported
  * next to the entry so a `track` or `url-only` policy is never read as
  * "integrity covered". Maps to the 6.4.3.b evidence row.
  */
-export type IntegrityMethod =
-  | 'hash-strict' // Scriptlock enforces the body hash on every run
-  | 'sri' // the page uses Subresource Integrity for this script
-  | 'csp' // a Content Security Policy restricts the source
-  | 'vendor-attested' // the vendor provides its own integrity assurance
-  | 'source-tracked' // only the source URL is controlled
-  | 'none';
+export const INTEGRITY_METHODS = [
+  'hash-strict', // Scriptlock enforces the body hash on every run
+  'sri', // the page uses Subresource Integrity for this script
+  'csp', // a Content Security Policy restricts the source
+  'vendor-attested', // the vendor provides its own integrity assurance
+  'source-tracked', // only the source URL is controlled
+  'none',
+] as const;
 
-export type ScriptCategory =
-  | 'payment'
-  | 'functional'
-  | 'framework'
-  | 'tag-manager'
-  | 'analytics'
-  | 'marketing'
-  | 'advertising'
-  | 'consent'
-  | 'customer-success'
-  | 'security'
-  | 'ab-testing'
-  | 'cdn'
-  | 'other';
+export type IntegrityMethod = (typeof INTEGRITY_METHODS)[number];
+
+export const SCRIPT_CATEGORIES = [
+  'payment',
+  'functional',
+  'framework',
+  'tag-manager',
+  'analytics',
+  'marketing',
+  'advertising',
+  'consent',
+  'customer-success',
+  'security',
+  'ab-testing',
+  'cdn',
+  'other',
+] as const;
+
+export type ScriptCategory = (typeof SCRIPT_CATEGORIES)[number];
 
 /**
  * What a `match` glob authorised when it was approved. A glob entry is not

@@ -1,6 +1,6 @@
 {
   "name": "scriptlock",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Client-side script inventory and change detection for web pages. A lockfile for everything that executes in the browser.",
   "keywords": [
     "script-inventory",
@@ -51,7 +51,7 @@
   "scripts": {
     "build": "tsup && tsc --emitDeclarationOnly",
     "dev": "tsx src/cli.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "vitest run --project e2e",

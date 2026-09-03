@@ -10,19 +10,20 @@
  *                          via `setHeaders` or `?headers=none`; `?worker=1` starts a dedicated worker
  *   /app.<hash>.js         first-party bundle; hash and body switched with `setBundle`
  *   /vendor.js?v=<n>       vendor script whose body embeds the version (`setVendorVersion`)
- *   /dynamic.js /late.js   inserted by the main page at runtime (immediately / after 1500 ms)
+ *   /dynamic.js /late.js   inserted by the main page at runtime (immediately / after LATE_TAG_MS)
  *   /spoof.js              body ends with `//# sourceURL=https://js.stripe.com/v3`
  *   /frame-same.html/.js   same-origin iframe with an inline and an external script
  *   /frame-cross.html/.js  iframe loaded from the localhost origin
  *   /worker.js             dedicated worker entry
  *   /challenge             503 page mimicking a Cloudflare interstitial
  *   /extra.js              extra first-party script, included in the main page after `setExtraScript(true)`
+ *   /assets/app.<8 hex>.js two chunks whose normalised ids collide, served only for `?collide=1`
  *   /frame-extra.js        extra script inside the cross-origin frame after `setFrameExtraScript(true)`
  *
  * `setBlocked(true)` makes `/` answer with the challenge page (503) so a profile
  * pointing at the main page can exercise the blocked detector.
  *
- * Templates in fixtures/site use {{APP_HASH}}, {{VENDOR_VERSION}}, {{CROSS_ORIGIN}},
+ * Templates in fixtures/site use {{APP_HASH}}, {{VENDOR_VERSION}}, {{CROSS_ORIGIN}}, {{LATE_TAG_MS}},
  * {{ORIGIN}} and {{NONCE}} (a per-request value inside one inline script, so its
  * sha256 differs per request while its structural hash is stable).
  *
@@ -90,6 +91,29 @@ export interface FixtureServer {
 }
 
 export const DEFAULT_APP_HASH = 'deadbeef0badf00d';
+
+/**
+ * How long the main page waits before inserting `/late.js`, the tag that proves
+ * the collector still sees scripts added after `load`.
+ *
+ * A profile's `settleMs` has to outlast this or the tag is simply not there and
+ * the scan is short one script — which surfaces later as an unexplained
+ * `removed` event in a chain of approve/diff tests. Derive the setting with
+ * `settleMsFor()` rather than writing a number, so the margin stays visible.
+ */
+export const LATE_TAG_MS = 1500;
+
+/**
+ * Hash tokens of the two `/assets/app.<hash>.js` chunks served for `?collide=1`.
+ * Both collapse to `/assets/app.[hash].js`, which is the identity collision the
+ * collector has to warn about.
+ */
+export const COLLIDING_HASHES: readonly string[] = ['aaaaaaa1', 'bbbbbbb2'];
+
+/** A settle period that comfortably outlasts the fixture's late tag. */
+export function settleMsFor(marginMs = 2000): number {
+  return LATE_TAG_MS + marginMs;
+}
 export const DEFAULT_APP_BODY = readFileSync(join(siteDir, 'app.default.js'), 'utf8');
 
 export function defaultSecurityHeaders(crossOrigin: string): Record<string, string> {
@@ -122,6 +146,14 @@ export async function start(options: FixtureServerOptions = {}): Promise<Fixture
   // Two string timers: each compiles page code without a URL and without a stack
   // trace. The interval fires once quickly and clears itself so both compile
   // within the settle window.
+  /**
+   * Two first-party chunks whose file names differ only in a hash token, so
+   * `collapseHashes` maps both onto `/assets/app.[hash].js`. Only one can be in
+   * the inventory, which the collector must never do silently (DESIGN.md 4.1
+   * rule 3). Off by default so the ordinary script counts do not shift.
+   */
+  const COLLIDING_SCRIPTS = `<script src="/assets/app.${COLLIDING_HASHES[0]}.js"></script>\n<script src="/assets/app.${COLLIDING_HASHES[1]}.js"></script>`;
+
   const VECTOR_SCRIPT =
     '<script>\n  setTimeout("window.__fixture.timerString = 1;", 5);\n  var iv = setInterval("window.__fixture.intervalString = (window.__fixture.intervalString || 0) + 1; clearInterval(iv);", 10);\n</script>';
 
@@ -134,6 +166,8 @@ export async function start(options: FixtureServerOptions = {}): Promise<Fixture
       .replaceAll('{{EXTRA_SCRIPTS}}', extraScript ? '<script src="/extra.js"></script>' : '')
       .replaceAll('{{FRAME_EXTRA_SCRIPTS}}', frameExtraScript ? '<script src="/frame-extra.js"></script>' : '')
       .replaceAll('{{VECTORS}}', extra['VECTORS'] ?? '')
+      .replaceAll('{{COLLIDING}}', extra['COLLIDING'] ?? '')
+      .replaceAll('{{LATE_TAG_MS}}', String(LATE_TAG_MS))
       .replaceAll('{{NONCE}}', randomBytes(8).toString('hex'));
 
   const send = (
@@ -166,7 +200,8 @@ export async function start(options: FixtureServerOptions = {}): Promise<Fixture
       const noHeaders = url.searchParams.get('headers') === 'none';
       const sec = noHeaders ? {} : (securityHeaders ?? defaultSecurityHeaders(crossOrigin));
       const vectors = url.searchParams.get('vectors') === '1' ? VECTOR_SCRIPT : '';
-      send(res, 200, render(readSite('index.html'), { VECTORS: vectors }), { ...htmlHeaders, ...sec });
+      const colliding = url.searchParams.get('collide') === '1' ? COLLIDING_SCRIPTS : '';
+      send(res, 200, render(readSite('index.html'), { VECTORS: vectors, COLLIDING: colliding }), { ...htmlHeaders, ...sec });
       return;
     }
     if (path === '/challenge' || path === '/') {
@@ -184,6 +219,12 @@ export async function start(options: FixtureServerOptions = {}): Promise<Fixture
         return;
       }
       send(res, 200, appBody, scriptHeaders('app'));
+      return;
+    }
+    const colliding = /^\/assets\/app\.([0-9a-f]{8})\.js$/.exec(path);
+    if (colliding && COLLIDING_HASHES.includes(colliding[1] ?? '')) {
+      // Distinct bodies, so the two really are different files.
+      send(res, 200, `window.__fixture.chunk_${colliding[1] ?? ''} = true;\n`, scriptHeaders('assets-app'));
       return;
     }
     if (path === '/vendor.js') {

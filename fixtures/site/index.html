@@ -16,6 +16,7 @@
 <script src="/vendor.js?v={{VENDOR_VERSION}}"></script>
 <script src="/spoof.js"></script>
 {{EXTRA_SCRIPTS}}
+{{COLLIDING}}
 </head>
 <body>
 <h1>Fixture shop</h1>
@@ -41,12 +42,13 @@
     var b = document.createElement('script');
     b.src = URL.createObjectURL(blob);
     document.head.appendChild(b);
-    // Late tag inserted after 1500 ms.
+    // Late tag; the delay is LATE_TAG_MS in fixtures/server.ts, which the tests
+    // derive their settleMs from.
     setTimeout(function () {
       var l = document.createElement('script');
       l.src = '/late.js';
       document.head.appendChild(l);
-    }, 1500);
+    }, {{LATE_TAG_MS}});
     // Optional dedicated worker.
     if (location.search.indexOf('worker=1') !== -1) {
       window.__fixture.worker = new Worker('/worker.js');

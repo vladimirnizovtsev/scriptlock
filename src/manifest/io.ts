@@ -18,6 +18,7 @@ import path from 'node:path';
 import YAML from 'yaml';
 import { ScriptlockError } from '../errors.js';
 import {
+  SCOPES,
   SECURITY_HEADER_NAMES,
   type Manifest,
   type ManifestFrame,
@@ -27,22 +28,21 @@ import {
 } from '../types.js';
 import { formatManifestIssues, manifestSchema, toManifest } from './schema.js';
 
-const SCOPE_ORDER: readonly Scope[] = ['merchant', 'tpsp', 'threeds', 'embedded', 'harness'];
-
 function compareStrings(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+/** Scripts sort by scope in the order `SCOPES` declares, then by id. */
 function scopeRank(scope: Scope): number {
-  const index = SCOPE_ORDER.indexOf(scope);
-  return index === -1 ? SCOPE_ORDER.length : index;
+  const index = SCOPES.indexOf(scope);
+  return index === -1 ? SCOPES.length : index;
 }
 
-export function compareScripts(a: ManifestScript, b: ManifestScript): number {
+function compareScripts(a: ManifestScript, b: ManifestScript): number {
   return scopeRank(a.scope) - scopeRank(b.scope) || compareStrings(a.id, b.id);
 }
 
-export function compareFrames(a: ManifestFrame, b: ManifestFrame): number {
+function compareFrames(a: ManifestFrame, b: ManifestFrame): number {
   return compareStrings(a.match, b.match);
 }
 

@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { start, type FixtureServer } from '../../fixtures/server.js';
+import { settleMsFor, start, type FixtureServer } from '../../fixtures/server.js';
 import { parseConfig } from '../../src/config/load.js';
 import { emptyManifest, serialiseManifest } from '../../src/manifest/io.js';
 import type { Manifest, ObservedScript, Snapshot } from '../../src/types.js';
@@ -162,7 +162,7 @@ function unrelatedManifest(): Manifest {
 function writeConfig(dir: string, url: string, extra: string[] = []): void {
   writeFileSync(
     join(dir, 'scriptlock.config.yaml'),
-    ['version: 1', ...extra, 'profiles:', '  default:', `    url: ${url}`, '    wait: load', '    settleMs: 2500', ''].join('\n'),
+    ['version: 1', ...extra, 'profiles:', '  default:', `    url: ${url}`, '    wait: load', `    settleMs: ${settleMsFor()}`, ''].join('\n'),
   );
 }
 

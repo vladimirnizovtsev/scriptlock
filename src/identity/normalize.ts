@@ -83,7 +83,7 @@ function collapseFileName(file: string): string {
 }
 
 /** Replace hash-like tokens in a URL path, keeping every delimiter in place. */
-export function collapsePathHashes(pathname: string): string {
+function collapsePathHashes(pathname: string): string {
   const slash = pathname.lastIndexOf('/');
   if (slash === -1) return collapseFileName(pathname);
   // Directory tokens always collapse: the file name next to them keeps the
@@ -104,7 +104,7 @@ function safeDecode(text: string): string {
  * encoding; only their (decoded) names are used for filtering and ordering.
  * Returns the query without a leading `?`, or an empty string.
  */
-export function normalizeQuery(rawQuery: string, cfg: IdentityConfig): string {
+function normalizeQuery(rawQuery: string, cfg: IdentityConfig): string {
   const query = rawQuery.startsWith('?') ? rawQuery.slice(1) : rawQuery;
   if (query === '') return '';
   const keep = new Set(cfg.keepQuery);

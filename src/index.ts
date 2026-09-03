@@ -1,165 +1,54 @@
 /**
- * Public API of scriptlock (DESIGN.md section 2): re-exports the shared
- * types, the error type and the module functions so the package can be used
- * as a library. The CLI entry point (src/cli.ts) is deliberately not exported
- * because it runs on import.
+ * Public API of scriptlock: the shared types, the error type and the module
+ * functions DESIGN.md section 2 names, so the package can be used as a library.
+ * The CLI entry point (src/cli.ts) is deliberately not exported because it runs
+ * on import.
  *
- * Supported surface at 0.1.x: `scan`, `diff`, `readManifest`, `writeManifest`,
- * the Zod schemas and the exported types. Everything else re-exported here is
- * an internal helper, exposed because the CLI and the tests share it; it may be
- * renamed or removed in any release. The README says the same, so that this is
- * not a semver promise made by accident. Narrowing the surface deliberately is
- * a 0.2 change, not a patch.
- *
- * Limitations: the command functions (runScan and friends) print through the
- * CommandContext they receive and resolve paths against its cwd; flow modules
- * are still resolved by the collector against process.cwd().
+ * While the package is 0.x this file *is* the supported surface, and it is the
+ * list in DESIGN.md section 2 plus the three Zod schemas. Anything reachable
+ * only through a deep import (`scriptlock/dist/...`) is internal and may be
+ * renamed or removed in any release; the README says the same, so that no
+ * semver promise is made by accident. The command functions the CLI runs are
+ * deliberately not here: they print through a CommandContext and resolve paths
+ * against its cwd, which makes them CLI plumbing rather than a library API.
  */
 export * from './types.js';
 export { ScriptlockError, isScriptlockError, type ScriptlockErrorCode } from './errors.js';
 
 // config
-export { loadConfig, parseConfig, interpolateEnv, manifestPathFor, CONFIG_FILE_NAMES, type ParseConfigOptions } from './config/load.js';
-export {
-  configSchema,
-  defaultConfig,
-  defaultProfile,
-  formatConfigIssues,
-  toScriptlockConfig,
-  DEFAULT_PROFILE_URL,
-  DEFAULT_SETTLE_MS,
-  DEFAULT_TIMEOUT_MS,
-  DEFAULT_VIEWPORT,
-} from './config/schema.js';
+export { loadConfig } from './config/load.js';
+export { configSchema, defaultConfig } from './config/schema.js';
 
 // collector
 export { scan } from './collector/collect.js';
-export { detectBlocked, extractTitle, type BlockedInput } from './collector/blocked.js';
 
 // identity
-export {
-  normalizeUrl,
-  structuralHash,
-  sha256,
-  deriveId,
-  classifyFrame,
-  lookupEntity,
-  isFirstParty,
-  BUILTIN_CACHE_BUSTERS,
-  BUILTIN_TPSP_HOSTS,
-  BUILTIN_THREEDS_HOSTS,
-  type DeriveIdInput,
-} from './identity/identity.js';
+export { normalizeUrl, structuralHash, sha256, deriveId, classifyFrame, lookupEntity, type DeriveIdInput } from './identity/identity.js';
 
 // manifest
-export { readManifest, writeManifest, parseManifest, serialiseManifest, sortManifest, emptyManifest } from './manifest/io.js';
-export { manifestSchema, formatManifestIssues, toManifest } from './manifest/schema.js';
-export {
-  findScriptEntry,
-  findScriptEntryById,
-  findFrameEntry,
-  coveringScriptEntries,
-  escapeGlob,
-  globMatches,
-  globNarrowness,
-  isIgnored,
-  isNarrowGlob,
-  matchingScriptEntries,
-  type GlobProblem,
-} from './manifest/match.js';
+export { readManifest, writeManifest, emptyManifest } from './manifest/io.js';
+export { manifestSchema } from './manifest/schema.js';
+export { findScriptEntry, findFrameEntry, isIgnored, globNarrowness, type GlobProblem } from './manifest/match.js';
 export {
   approveScripts,
   approveMatch,
-  approveFrames,
+  scriptsMatchingGlob,
   redundantScriptEntries,
   refreshTracked,
-  refreshScripts,
-  scriptsMatchingGlob,
-  defaultIntegrityFor,
-  defaultIntegrityMethod,
-  isPlaceholder,
-  ALL_NEW,
-  COVERAGE_EVIDENCE_LIMIT,
-  GLOB_INTEGRITY,
   type ApproveMatchOptions,
   type ApproveMeta,
-  type ApproveFrameMeta,
-  type ApproveHelpers,
 } from './manifest/approve.js';
 
 // diff
-export { diff, bundleHints, bundlePath, BUNDLE_HINT_THRESHOLD, MAX_HINTS, type DiffExtras, type NormalizeUrlFn } from './diff/diff.js';
-export {
-  severityFor,
-  policyRows,
-  renderPolicyTable,
-  SEVERITY,
-  CHANGED_SEVERITY,
-  HEADER_SEVERITY,
-  DIFF_MODES,
-  DIFF_EVENT_TYPES,
-  type PolicyRow,
-  type PolicySeverity,
-} from './diff/policy.js';
+export { diff } from './diff/diff.js';
 
 // report
 export { renderText, type TextOptions } from './report/text.js';
-export { renderMarkdown, renderInventoryMarkdown, inventoryStatus, type InventoryStatus } from './report/markdown.js';
-export { renderJson, resultToJson } from './report/json.js';
+export { renderMarkdown, renderInventoryMarkdown } from './report/markdown.js';
+export { renderJson } from './report/json.js';
 
 // history
-export { appendHistory, historyStem, snapshotToJson } from './history/store.js';
+export { appendHistory } from './history/store.js';
 
-// commands (the same functions the CLI runs, usable in-process)
-export {
-  runScan,
-  loadProfile,
-  requireProfile,
-  lastSnapshotPath,
-  parseSnapshot,
-  readSnapshot,
-  writeSnapshot,
-  renderScanSummary,
-  type CommandContext,
-  type ScanCommandOptions,
-  type ScanCommandResult,
-} from './commands/scan.js';
-export { runDiff, historyDir, renderReport, type DiffCommandOptions, type DiffCommandResult, type DiffFormat } from './commands/diff.js';
-export {
-  runApprove,
-  detectApprover,
-  todayUtc,
-  SCRIPT_CATEGORIES,
-  INTEGRITY_POLICIES,
-  INTEGRITY_METHODS,
-  type ApproveCommandOptions,
-  type ApproveCommandResult,
-} from './commands/approve.js';
-export {
-  runReport,
-  inventoryToJson,
-  renderInventoryJson,
-  type InventoryJson,
-  type ReportCommandOptions,
-  type ReportCommandResult,
-  type ReportFormat,
-} from './commands/report.js';
-export { runInit, configTemplate, type InitCommandOptions, type InitCommandResult } from './commands/init.js';
-export {
-  runInstallBrowser,
-  installArgs,
-  playwrightCliPath,
-  DEFAULT_BROWSERS,
-  type InstallBrowserOptions,
-  type InstallBrowserResult,
-} from './commands/install-browser.js';
-
-// package-manager detection for the commands the CLI prints
-export {
-  detectPackageManager,
-  runnerPrefix,
-  scriptlockCommand,
-  addDevDependencyCommand,
-  RUNNERS,
-  type PackageManager,
-} from './runner.js';
+// snapshot files
+export { snapshotSchema } from './commands/snapshot.js';

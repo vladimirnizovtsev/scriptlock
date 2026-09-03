@@ -4,6 +4,7 @@ import {
   approveFrames,
   approveMatch,
   approveScripts,
+  bodyNotCaptured,
   firstPartySubject,
   isPlaceholder,
   redundantScriptEntries,
@@ -24,7 +25,14 @@ function hex(seed: string): string {
   return seed.repeat(64).slice(0, 64);
 }
 
-function observed(id: string, overrides: Partial<ObservedScript> = {}): ObservedScript {
+/**
+ * Overrides may carry an explicit `undefined` to *remove* an optional field
+ * from the factory output, which `exactOptionalPropertyTypes` forbids on a
+ * plain `Partial<T>`. Same shape as test/unit/diff/helpers.ts.
+ */
+type Overrides<T> = { [K in keyof T]?: T[K] | undefined };
+
+function observed(id: string, overrides: Overrides<ObservedScript> = {}): ObservedScript {
   const isUrl = /^(https?|blob|data):/.test(id);
   return {
     id,
@@ -42,7 +50,7 @@ function observed(id: string, overrides: Partial<ObservedScript> = {}): Observed
     isModule: false,
     observedInRuns: 1,
     ...overrides,
-  };
+  } as ObservedScript;
 }
 
 function frame(url: string, overrides: Partial<FrameInfo> = {}): FrameInfo {
@@ -392,6 +400,21 @@ describe('approveScripts: worker and body-not-captured entries', () => {
     expect(() => approveScripts(base(), snapshot([workerScript]), [`${MAIN}/worker.js`], { ...META, integrity: 'structural' }, DEFAULTS)).toThrow(ScriptlockError);
     // url-only is accepted.
     expect(approveScripts(base(), snapshot([workerScript]), [`${MAIN}/worker.js`], { ...META, integrity: 'url-only' }, DEFAULTS).scripts[0]?.integrity).toBe('url-only');
+  });
+
+  // DESIGN.md section 6 words the rule as "worker (and any script whose body was
+  // not captured)". The collector always computes a sha256 for what reaches it,
+  // so the second half of the rule only ever protects a library caller that
+  // hands in a hand-built ObservedScript.
+  it('treats any script without a sha256 as body-not-captured, not only workers', () => {
+    const sourceless = observed(`${MAIN}/sourceless.js`, { sha256: undefined, structuralHash: undefined });
+    expect(bodyNotCaptured(sourceless)).toBe(true);
+    expect(bodyNotCaptured(observed(`${MAIN}/ordinary.js`))).toBe(false);
+
+    const out = approveScripts(base(), snapshot([sourceless]), ['*'], META, DEFAULTS);
+    expect(out.scripts[0]).toMatchObject({ kind: 'external', integrity: 'url-only', integrityMethod: 'none' });
+    expect(out.scripts[0]).not.toHaveProperty('sha256');
+    expect(() => approveScripts(base(), snapshot([sourceless]), ['*'], { ...META, integrity: 'strict' }, DEFAULTS)).toThrow(/body was not captured/);
   });
 
   it('re-approving a worker keeps it url-only and still carries no hash', () => {

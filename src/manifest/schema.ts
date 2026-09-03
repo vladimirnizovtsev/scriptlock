@@ -13,33 +13,25 @@
  */
 import { z } from 'zod';
 import {
+  INTEGRITY_METHODS,
+  INTEGRITY_POLICIES,
+  SCOPES,
+  SCRIPT_CATEGORIES,
+  SCRIPT_KINDS,
   SECURITY_HEADER_NAMES,
   type Manifest,
   type ManifestFrame,
   type ManifestScript,
-  type SecurityHeaderName,
   type SecurityHeaders,
 } from '../types.js';
 
-const scriptKindSchema = z.enum(['external', 'inline', 'eval', 'blob', 'data', 'wasm', 'worker', 'unknown']);
-const scopeSchema = z.enum(['merchant', 'tpsp', 'threeds', 'embedded', 'harness']);
-const integrityPolicySchema = z.enum(['strict', 'structural', 'track', 'url-only']);
-const integrityMethodSchema = z.enum(['hash-strict', 'sri', 'csp', 'vendor-attested', 'source-tracked', 'none']);
-const categorySchema = z.enum([
-  'payment',
-  'functional',
-  'framework',
-  'tag-manager',
-  'analytics',
-  'marketing',
-  'advertising',
-  'consent',
-  'customer-success',
-  'security',
-  'ab-testing',
-  'cdn',
-  'other',
-]);
+// Every enum below is built from the list in types.ts that also defines the
+// union, so a member added there cannot be rejected by this validator.
+const scriptKindSchema = z.enum(SCRIPT_KINDS);
+const scopeSchema = z.enum(SCOPES);
+const integrityPolicySchema = z.enum(INTEGRITY_POLICIES);
+const integrityMethodSchema = z.enum(INTEGRITY_METHODS);
+const categorySchema = z.enum(SCRIPT_CATEGORIES);
 const headerPolicySchema = z.enum(['strict', 'track', 'ignore']);
 const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected an ISO date (YYYY-MM-DD)');
 const hashSchema = z.string().min(1);
@@ -93,7 +85,7 @@ const frameSchema = z.strictObject({
   approvedAt: isoDateSchema,
 });
 
-const headerNameSchema = z.enum(SECURITY_HEADER_NAMES as [SecurityHeaderName, ...SecurityHeaderName[]]);
+export const headerNameSchema = z.enum(SECURITY_HEADER_NAMES);
 
 const headersSchema = z.strictObject({
   policy: headerPolicySchema.default('strict'),

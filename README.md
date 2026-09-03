@@ -8,7 +8,7 @@ No agent on the page, nothing injected into real users' sessions, no data leavin
 
 It is built for teams that run a custom or embedded (iframe) checkout with a repository and CI. Scanning is synthetic and periodic, which is a real limitation with real consequences: read [Limits](#limits-what-a-synthetic-scan-cannot-tell-you) before you rely on it for a PCI audit.
 
-[![npm](https://img.shields.io/npm/v/scriptlock?color=333&label=npm)](https://www.npmjs.com/package/scriptlock) Early software, the 0.2.x line: implemented and tested, run against real storefronts, not yet used in a PCI assessment. The manifest format and the CLI may change before 1.0, and breaking changes are listed in the [changelog](CHANGELOG.md).
+[![npm](https://img.shields.io/npm/v/scriptlock?color=333&label=npm)](https://www.npmjs.com/package/scriptlock) Early software, the 0.4.x line: implemented and tested, run against real storefronts, not yet used in a PCI assessment. The manifest format and the CLI may change before 1.0, and breaking changes are listed in the [changelog](CHANGELOG.md).
 
 ## Start here: a real run, step by step
 
@@ -163,10 +163,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: vladimirnizovtsev/scriptlock@v0.3.0
+      - uses: vladimirnizovtsev/scriptlock@v0.4.0
         with:
           mode: gate
-          version: "0.3.0"
+          version: "0.4.0"
 
   drift:
     if: github.event_name != 'pull_request'
@@ -175,11 +175,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: vladimirnizovtsev/scriptlock@v0.3.0
+      - uses: vladimirnizovtsev/scriptlock@v0.4.0
         with:
           mode: drift
           history: "true"
-          version: "0.3.0"
+          version: "0.4.0"
 ```
 
 ![a GitHub Actions run summary for the demo repository: gate skipped on a manual run, drift failed](https://raw.githubusercontent.com/vladimirnizovtsev/scriptlock/main/media/05-ci-red-check.png)
@@ -281,12 +281,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: vladimirnizovtsev/scriptlock@v0.3.0
+      - uses: vladimirnizovtsev/scriptlock@v0.4.0
         with:
           profile: ${{ matrix.profile }}
           mode: drift
           history: "true"
-          version: "0.3.0"
+          version: "0.4.0"
 ```
 
 ## Reference
@@ -609,7 +609,7 @@ Exit codes: 0 clean, 1 findings at fail severity (or no manifest yet), 2 run err
 
 ### Library API
 
-Scriptlock is a CLI. The package also has an importable entry point — ESM only, Node 22 or later: use `import` or a dynamic `import()`, because the package declares no `require` condition and `require('scriptlock')` fails with `ERR_PACKAGE_PATH_NOT_EXPORTED` from a CommonJS file such as a `next.config.js`. At 0.2.x only `scan`, `diff`, `readManifest`, `writeManifest`, the Zod schemas and the exported types are treated as public. Everything else `scriptlock` exports is an internal helper that may be renamed or removed in any release without a major version bump.
+Scriptlock is a CLI. The package also has an importable entry point — ESM only, Node 22 or later: use `import` or a dynamic `import()`, because the package declares no `require` condition and `require('scriptlock')` fails with `ERR_PACKAGE_PATH_NOT_EXPORTED` from a CommonJS file such as a `next.config.js`. While the package is 0.x, what `scriptlock` exports from its entry point is the whole public surface: the functions named in [DESIGN.md section 2](DESIGN.md), the three Zod schemas (`configSchema`, `manifestSchema`, `snapshotSchema`) and the exported types. Anything reachable only through a deep import (`scriptlock/dist/...`) is an internal helper that may be renamed or removed in any release without a major version bump.
 
 ### GitHub Action
 
@@ -618,13 +618,13 @@ The repository root contains a composite action. It validates its inputs, instal
 The action is versioned by its git ref, not by npm: the runner reads `action.yml` from the ref in `uses:`, so a fix to the action reaches you when you change that ref. Pin it to a full commit SHA (best) or to a release tag; the `version:` input separately pins the npm package that produces the evidence.
 
 ```yaml
-- uses: vladimirnizovtsev/scriptlock@v0.3.0
+- uses: vladimirnizovtsev/scriptlock@v0.4.0
   with:
     profile: default          # profile from scriptlock.config.yaml
     mode: gate                # gate | drift
     config: scriptlock.config.yaml  # default is empty: look up .yaml, then .yml
     node-version: "22"
-    version: "0.3.0"          # npm version of the CLI; "latest" is not reproducible
+    version: "0.4.0"          # npm version of the CLI; "latest" is not reproducible
     history: "false"          # also write .scriptlock/history/<profile>/
     working-directory: .      # the manifest and .scriptlock/ resolve against this
     summary: "true"           # publish the report to the job summary and the log
@@ -703,7 +703,7 @@ Only scan properties you own or have written permission to scan. Never point flo
 
 ### Roadmap
 
-0.2.x is the inventory, the manifest, the diff and the Action. Later, in rough order: worker script bodies (dedicated and service workers), a CSP draft derived from the manifest, SARIF output for code scanning, alert webhooks, and a history store beyond flat JSON files. No hosted service is planned.
+0.4.x is the inventory, the manifest, the diff and the Action. Later, in rough order: worker script bodies (dedicated and service workers), a CSP draft derived from the manifest, SARIF output for code scanning, alert webhooks, and a history store beyond flat JSON files. No hosted service is planned.
 
 ## License
 

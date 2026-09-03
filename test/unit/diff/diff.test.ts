@@ -4,7 +4,6 @@ import type { DiffEvent, DiffMode } from '../../../src/types.js';
 import {
   APP_ID,
   APP_SHA,
-  APP_STRUCT,
   fakeNormalizeUrl,
   hex,
   INLINE_ID,
@@ -144,6 +143,32 @@ describe('diff: removed', () => {
     expect(ofType(result.events, 'removed')).toEqual([]);
     expect(ofType(result.events, 'new')).toEqual([]);
     expect(result.summary.approved).toBe(1);
+  });
+
+  // The whole point of `approve --match`: a hashless track glob authorises many
+  // bodies and pins none of them, so it must stay silent run after run. Without
+  // the `known.length === 0` clause in compareBody every covered script would
+  // report `changed` on every scan, which is what the glob exists to prevent.
+  it('a script authorised only by a hashless track glob reports nothing', () => {
+    const id = 'https://shop.example.com/assets/chunk.abc.js';
+    // Exactly the shape approveMatch writes: match set, no sha256, no structuralHash.
+    const glob = makeEntry({
+      id: 'https://shop.example.com/assets/*.js',
+      match: 'https://shop.example.com/assets/*.js',
+      integrity: 'track',
+      integrityMethod: 'source-tracked',
+      sha256: undefined,
+      structuralHash: undefined,
+      lastSeenSha256: undefined,
+    });
+    const result = run({ scripts: [makeScript({ id, sha256: hex('9'), structuralHash: hex('a') })] }, { scripts: [glob] }, 'gate');
+    expect(result.events).toEqual([]);
+    expect(result.summary.approved).toBe(1);
+    expect(result.exitCode).toBe(0);
+
+    // A second deploy renames the chunk and changes its body: still silent.
+    const next = run({ scripts: [makeScript({ id: 'https://shop.example.com/assets/chunk.def.js', sha256: hex('b') })] }, { scripts: [glob] }, 'gate');
+    expect(next.events).toEqual([]);
   });
 
   it('a glob entry shadowed by exact entries for every id it covers is still observed', () => {

@@ -26,6 +26,8 @@ import { configTemplate } from '../../src/commands/init.js';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const readme = readFileSync(join(repoRoot, 'README.md'), 'utf8');
+const contributing = readFileSync(join(repoRoot, 'CONTRIBUTING.md'), 'utf8');
+const packageJson = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as { version: string };
 const exampleConfig = readFileSync(join(repoRoot, 'examples', 'scriptlock.config.yaml'), 'utf8');
 
 /**
@@ -118,5 +120,44 @@ describe('the annotated configuration', () => {
     const command = /`([^`]*install-browser[^`]*)`/.exec(configTemplate())?.[1];
     expect(command, 'the init template must name the browser install command').toBeDefined();
     expect(exampleConfig).toContain(`\`${String(command)}\``);
+  });
+});
+
+describe('the release runbook', () => {
+  // CONTRIBUTING.md holds the only commands in the repository that move a git
+  // tag, and it was the one runnable-command file no guard read: it shipped
+  // `git tag -f v0.4 v0.4.0 && git push -f origin v0.2`, which force-moves a
+  // tag the release never touched and leaves everyone pinned to `v0.3` with
+  // nothing. ci.yml notes that a mutable major tag is a code-execution vector,
+  // so the wrong tag is not a typo-shaped problem.
+  const releaseSection = contributing.slice(contributing.indexOf('## Releasing'), contributing.indexOf('## Reporting bugs'));
+  const shellBlocks = [...releaseSection.matchAll(/```sh\n([\s\S]*?)```/g)].map((match) => match[1] ?? '');
+
+  it('has shell blocks to check', () => {
+    expect(shellBlocks.length).toBeGreaterThan(0);
+  });
+
+  it('pushes every tag it creates, and creates every tag it pushes', () => {
+    for (const block of shellBlocks) {
+      const created = new Set([...block.matchAll(/git tag (?:-f|-a) (\S+)/g)].map((match) => match[1]));
+      const pushed = [...block.matchAll(/git push (?:-f )?origin (\S+)/g)].map((match) => match[1]);
+      expect(pushed.length, `no push in block: ${block}`).toBeGreaterThan(0);
+      for (const tag of pushed) {
+        expect(created.has(tag), `pushes ${String(tag)} but the same block never creates it`).toBe(true);
+      }
+      for (const tag of created) {
+        expect(pushed.includes(tag), `creates ${String(tag)} but never pushes it`).toBe(true);
+      }
+    }
+  });
+
+  it('tags the version package.json actually holds', () => {
+    const annotated = [...releaseSection.matchAll(/git tag -a (v\S+)/g)].map((match) => match[1]);
+    expect(annotated).toContain(`v${packageJson.version}`);
+    // The moving tags must track that same release, not an older one.
+    for (const [, moving, target] of releaseSection.matchAll(/git tag -f (\S+)\s+(v\S+)/g)) {
+      expect(target, `${String(moving)} must be moved to the released version`).toBe(`v${packageJson.version}`);
+      expect(`v${packageJson.version}`.startsWith(String(moving))).toBe(true);
+    }
   });
 });

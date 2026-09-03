@@ -72,12 +72,9 @@ export function coveringScriptEntries(manifest: Manifest, observedId: string): M
   return [...exact, ...globs];
 }
 
-export function findScriptEntry(manifest: Manifest, observed: Pick<ObservedScript, 'id'>): ManifestScript | undefined {
-  return matchingScriptEntries(manifest, observed.id)[0];
-}
-
-export function findScriptEntryById(manifest: Manifest, observedId: string): ManifestScript | undefined {
-  return matchingScriptEntries(manifest, observedId)[0];
+/** The manifest entry that authorises an observed script, by the script or by its id. */
+export function findScriptEntry(manifest: Manifest, observed: Pick<ObservedScript, 'id'> | string): ManifestScript | undefined {
+  return matchingScriptEntries(manifest, typeof observed === 'string' ? observed : observed.id)[0];
 }
 
 /** Frames are matched by their (normalised) URL against `match` (exact or glob). */
@@ -125,7 +122,7 @@ interface GlobShape {
 function shapeOf(glob: string): GlobShape {
   const shape: GlobShape = { literal: '', hasWildcard: false, hasDoubleStar: false, spanning: [], crossesDirectory: false };
   for (let i = 0; i < glob.length; i += 1) {
-    const char = glob[i] as string;
+    const char = glob.charAt(i);
     if (char === '\\') {
       const escaped = glob[i + 1];
       if (escaped !== undefined && !shape.hasWildcard) shape.literal += escaped;

@@ -37,7 +37,7 @@ export interface BlockedInput {
 }
 
 /** Statuses that vendors use for challenge and block pages (428 is Akamai SEC-CPT). */
-export const BLOCKED_STATUSES: ReadonlySet<number> = new Set([403, 428, 429, 503]);
+const BLOCKED_STATUSES: ReadonlySet<number> = new Set([403, 428, 429, 503]);
 
 interface Context {
   input: BlockedInput;

@@ -21,6 +21,7 @@
  * navigation.
  */
 import type { BrowserContext, CDPSession, Page } from 'playwright-core';
+import { errorMessage } from '../errors.js';
 
 export interface RawStackFrame {
   url: string;
@@ -118,8 +119,24 @@ export interface Capture {
   dispose(): Promise<void>;
 }
 
-// Minimal structural views of the CDP payloads we consume. Playwright's
-// Protocol namespace is not part of its package exports.
+// ---------------------------------------------------------------------------
+// The CDP boundary
+// ---------------------------------------------------------------------------
+//
+// Commands are typed by playwright-core: `CDPSession['send']` is a single
+// generic signature over the Protocol namespace, so it can be captured by name
+// even though that namespace is not part of the package's exports map.
+//
+// Events are not: all five `CDPSession` listener methods are overloaded, so the
+// payload types cannot be recovered through `Parameters<>`. The shapes below
+// are therefore hand-mirrored from the CDP protocol. They cover only the events
+// this module consumes and only the fields it reads, which is the point: a
+// field the collector has not declared is a compile error rather than a silent
+// `undefined` on page-controlled data.
+
+/** Command half of a CDP session, with playwright's own per-method typing. */
+type CdpSend = CDPSession['send'];
+
 interface AuxData {
   frameId?: string;
   type?: string;
@@ -139,6 +156,46 @@ interface CdpFrameTree {
   childFrames?: CdpFrameTree[];
 }
 
+/** The CDP events `wire` subscribes to, and the fields it reads from each. */
+interface CdpEvents {
+  'Target.attachedToTarget': {
+    sessionId?: string;
+    targetInfo?: { type?: string; url?: string };
+    waitingForDebugger?: boolean;
+  };
+  'Target.receivedMessageFromTarget': { sessionId?: string; message: string };
+  'Target.detachedFromTarget': { sessionId?: string };
+  'Page.frameAttached': { frameId: string; parentFrameId: string };
+  'Page.frameNavigated': { frame: CdpFrame };
+  'Page.navigatedWithinDocument': { frameId: string; url: string };
+  'Network.requestWillBeSent': {
+    requestId: string;
+    request: { url: string };
+    type?: string;
+    frameId?: string;
+    documentURL: string;
+    initiator: { type: string; url?: string; stack?: CdpStackTrace };
+  };
+  'Network.responseReceived': {
+    requestId: string;
+    type: string;
+    frameId?: string;
+    response: { url: string; status: number; headers: Record<string, string> };
+  };
+  'Debugger.scriptParsed': {
+    scriptId: string;
+    url: string;
+    embedderName?: string;
+    hasSourceURL?: boolean;
+    isModule?: boolean;
+    scriptLanguage?: string;
+    startLine: number;
+    startColumn: number;
+    executionContextAuxData?: AuxData;
+    stackTrace?: CdpStackTrace;
+  };
+}
+
 function toStack(trace: CdpStackTrace | undefined, limit = 8): RawStackFrame[] | undefined {
   if (trace === undefined || trace.callFrames.length === 0) return undefined;
   return trace.callFrames.slice(0, limit).map((frame) => ({
@@ -150,16 +207,26 @@ function toStack(trace: CdpStackTrace | undefined, limit = 8): RawStackFrame[] |
 }
 
 interface SessionLike {
-  send(method: string, params?: object): Promise<any>;
-  on(event: string, handler: (params: any) => void): void;
+  send: CdpSend;
+  on<K extends keyof CdpEvents>(event: K, handler: (params: CdpEvents[K]) => void): void;
 }
 
 /** Wraps a Playwright CDPSession as the minimal SessionLike used by `wire`. */
 function adapt(session: CDPSession): SessionLike {
   return {
-    send: session.send.bind(session) as unknown as (method: string, params?: object) => Promise<any>,
-    on: session.on.bind(session) as unknown as (event: string, handler: (params: any) => void) => void,
+    send: session.send.bind(session),
+    // The listener overloads cannot be expressed generically, so the event map
+    // is applied here once instead of at every subscription.
+    on: (event, handler) => {
+      (session.on as unknown as (name: string, listener: (params: never) => void) => void)(event, handler as (params: never) => void);
+    },
   };
+}
+
+interface PendingCommand {
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 /**
@@ -168,51 +235,91 @@ function adapt(session: CDPSession): SessionLike {
  * and replies / events come back as `Target.receivedMessageFromTarget`, fed in
  * through `dispatch`. Each event is registered once, so a single handler per
  * method is enough.
+ *
+ * Every command is raced against `timeoutMs` and every unanswered command is
+ * rejected by `close()`. A child target can go away after the parent accepted
+ * `Target.sendMessageToTarget` but before the reply arrives, and the reply is
+ * the only thing that settles the promise: without both, one torn-down
+ * cross-origin iframe would hang `refreshFrames()` — and with it the whole
+ * scan — for ever, since `context.setDefaultTimeout` does not reach raw CDP.
  */
 class ChildSession implements SessionLike {
   private nextId = 1;
-  private readonly pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>();
-  private readonly handlers = new Map<string, (params: any) => void>();
+  private closed: Error | undefined;
+  private readonly pending = new Map<number, PendingCommand>();
+  private readonly handlers = new Map<string, (params: never) => void>();
+
   constructor(
     private readonly parent: SessionLike,
     private readonly sessionId: string,
+    private readonly timeoutMs: number,
   ) {}
-  send(method: string, params: object = {}): Promise<any> {
+
+  // The method name is dynamic, which is the whole point of this class, so the
+  // one honest cast in this file lives here rather than at every call site.
+  readonly send = ((method: string, params: object = {}): Promise<unknown> => this.sendRaw(method, params)) as unknown as CdpSend;
+
+  private sendRaw(method: string, params: object): Promise<unknown> {
+    if (this.closed !== undefined) return Promise.reject(this.closed);
     const id = this.nextId++;
-    return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+    return new Promise<unknown>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.settle(id)?.reject(new Error(`CDP command ${method} on a child target timed out after ${this.timeoutMs} ms`));
+      }, this.timeoutMs);
+      timer.unref?.();
+      this.pending.set(id, { resolve, reject, timer });
       this.parent
         .send('Target.sendMessageToTarget', { sessionId: this.sessionId, message: JSON.stringify({ id, method, params }) })
-        .catch((error: unknown) => reject(error instanceof Error ? error : new Error(String(error))));
+        .catch((error: unknown) => {
+          this.settle(id)?.reject(error instanceof Error ? error : new Error(String(error)));
+        });
     });
   }
-  on(event: string, handler: (params: any) => void): void {
-    this.handlers.set(event, handler);
+
+  /** Removes the command from the pending map and stops its timer, once. */
+  private settle(id: number): PendingCommand | undefined {
+    const command = this.pending.get(id);
+    if (command === undefined) return undefined;
+    this.pending.delete(id);
+    clearTimeout(command.timer);
+    return command;
   }
+
+  on<K extends keyof CdpEvents>(event: K, handler: (params: CdpEvents[K]) => void): void {
+    this.handlers.set(event, handler as (params: never) => void);
+  }
+
   dispatch(message: string): void {
     let msg: { id?: number; error?: { message?: string }; result?: unknown; method?: string; params?: unknown };
     try {
-      msg = JSON.parse(message);
+      msg = JSON.parse(message) as typeof msg;
     } catch {
       return;
     }
     if (typeof msg.id === 'number') {
-      const callback = this.pending.get(msg.id);
-      if (callback === undefined) return;
-      this.pending.delete(msg.id);
-      if (msg.error) callback.reject(new Error(msg.error.message ?? 'CDP error'));
-      else callback.resolve(msg.result);
+      const command = this.settle(msg.id);
+      if (command === undefined) return;
+      if (msg.error) command.reject(new Error(msg.error.message ?? 'CDP error'));
+      else command.resolve(msg.result);
       return;
     }
-    if (typeof msg.method === 'string') this.handlers.get(msg.method)?.(msg.params);
+    if (typeof msg.method === 'string') this.handlers.get(msg.method)?.(msg.params as never);
+  }
+
+  /** Rejects every command still waiting for a reply that will never come. */
+  close(reason: Error): void {
+    this.closed = reason;
+    for (const id of [...this.pending.keys()]) this.settle(id)?.reject(reason);
   }
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message.split('\n')[0] ?? error.message : String(error);
-}
 
-export async function attachCapture(context: BrowserContext, page: Page): Promise<Capture> {
+/**
+ * Attaches to `page` before navigation and returns the Capture. `timeoutMs`
+ * bounds every command sent to a child target; the main session is bounded by
+ * Playwright's own context timeout.
+ */
+export async function attachCapture(context: BrowserContext, page: Page, timeoutMs: number): Promise<Capture> {
   const scripts: RawScript[] = [];
   const requests: RawRequest[] = [];
   const responses: RawResponse[] = [];
@@ -251,7 +358,12 @@ export async function attachCapture(context: BrowserContext, page: Page): Promis
       if (typeof event.sessionId === 'string') childBySessionId.get(event.sessionId)?.dispatch(event.message);
     });
     session.on('Target.detachedFromTarget', (event) => {
-      if (typeof event.sessionId === 'string') childBySessionId.delete(event.sessionId);
+      if (typeof event.sessionId !== 'string') return;
+      const child = childBySessionId.get(event.sessionId);
+      childBySessionId.delete(event.sessionId);
+      // The reply to an in-flight command can no longer arrive: fail it now, or
+      // the next refreshFrames() waits on it for the rest of the scan.
+      child?.close(new Error('the child target detached before the command was answered'));
     });
 
     session.on('Page.frameAttached', (event) => {
@@ -260,7 +372,7 @@ export async function attachCapture(context: BrowserContext, page: Page): Promis
       }
     });
     session.on('Page.frameNavigated', (event) => {
-      walkTree({ frame: event.frame as CdpFrame });
+      walkTree({ frame: event.frame });
     });
     session.on('Page.navigatedWithinDocument', (event) => {
       const frame = frames.get(event.frameId);
@@ -270,7 +382,7 @@ export async function attachCapture(context: BrowserContext, page: Page): Promis
     session.on('Network.requestWillBeSent', (event) => {
       const initiator: RawInitiator = { type: event.initiator.type };
       if (event.initiator.url !== undefined) initiator.url = event.initiator.url;
-      const stack = toStack(event.initiator.stack as CdpStackTrace | undefined);
+      const stack = toStack(event.initiator.stack);
       if (stack !== undefined) initiator.stack = stack;
       requests.push({
         sessionKey: key,
@@ -296,7 +408,7 @@ export async function attachCapture(context: BrowserContext, page: Page): Promis
     });
 
     session.on('Debugger.scriptParsed', (event) => {
-      const aux = (event.executionContextAuxData ?? {}) as AuxData;
+      const aux = event.executionContextAuxData ?? {};
       const frameId = aux.frameId ?? '';
       const frame = frames.get(frameId);
       const record: RawScript = {
@@ -318,7 +430,7 @@ export async function attachCapture(context: BrowserContext, page: Page): Promis
         source: '',
         order: order++,
       };
-      const stack = toStack(event.stackTrace as CdpStackTrace | undefined);
+      const stack = toStack(event.stackTrace);
       if (stack !== undefined) record.stack = stack;
 
       // Playwright's isolated utility worlds are harness; skip them here. Every
@@ -354,7 +466,7 @@ export async function attachCapture(context: BrowserContext, page: Page): Promis
     // child could never be resumed. Failures (e.g. on a plain page target) are ignored.
     await session.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: true, flatten: false }).catch(() => undefined);
     const tree = await session.send('Page.getFrameTree');
-    walkTree(tree.frameTree as CdpFrameTree);
+    walkTree(tree.frameTree);
     return;
   };
 
@@ -364,7 +476,7 @@ export async function attachCapture(context: BrowserContext, page: Page): Promis
     const sessionId = event.sessionId;
     if (typeof sessionId !== 'string' || childBySessionId.has(sessionId)) return;
     const targetInfo = event.targetInfo ?? {};
-    const child = new ChildSession(parent, sessionId);
+    const child = new ChildSession(parent, sessionId, timeoutMs);
     childBySessionId.set(sessionId, child);
     try {
       if (targetInfo.type === 'iframe' || targetInfo.type === 'page') {
@@ -407,7 +519,7 @@ export async function attachCapture(context: BrowserContext, page: Page): Promis
       for (const session of sessions) {
         try {
           const tree = await session.send('Page.getFrameTree');
-          walkTree(tree.frameTree as CdpFrameTree);
+          walkTree(tree.frameTree);
         } catch {
           // Session detached (frame removed); keep what we have.
         }
@@ -430,6 +542,7 @@ export async function attachCapture(context: BrowserContext, page: Page): Promis
     },
     async dispose() {
       disposed = true;
+      for (const child of childBySessionId.values()) child.close(new Error('the capture was disposed'));
       childBySessionId.clear();
       // Only the main session is a real CDPSession; child shims tear down with it.
       try {

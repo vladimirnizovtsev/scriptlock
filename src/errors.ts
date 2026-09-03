@@ -35,3 +35,12 @@ export class ScriptlockError extends Error {
 export function isScriptlockError(value: unknown): value is ScriptlockError {
   return value instanceof ScriptlockError;
 }
+
+/**
+ * First line of whatever was thrown, for a message or a warning. Playwright and
+ * CDP errors carry a multi-line body (the call log, a stack) that is noise in a
+ * one-line report.
+ */
+export function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message.split('\n')[0] ?? error.message : String(error);
+}

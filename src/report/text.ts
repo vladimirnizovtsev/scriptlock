@@ -1,11 +1,17 @@
 /**
- * Terminal rendering of a DiffResult with picocolors.
+ * Terminal rendering of a DiffResult with picocolors, and the plain-text
+ * building blocks every terminal report shares (DESIGN.md section 2 assigns
+ * terminal output to this module).
  *
  * Output: a header line, events grouped by severity (fail, warn, info), any
  * matching warnings, the hints (a suggestion sentence and the command to
  * copy, indented under it) and a one-line summary that explains the exit code.
  * Colour is on by default when the terminal supports it and can be forced
  * either way with `color`.
+ *
+ * Also owns `renderColumns` (aligned columns for the scan summary and the
+ * severity matrix) and `eventValues` (whether an event prints its before/after
+ * pair), so the terminal and markdown reports cannot drift apart on that rule.
  * Limitation: no column wrapping; long ids are printed as-is.
  */
 import pc from 'picocolors';
@@ -22,9 +28,51 @@ function isHash(value: string): boolean {
   return /^[a-f0-9]{32,}$/i.test(value);
 }
 
-/** Shortens hex hashes to 12 characters; other values are returned unchanged. */
+/**
+ * Shortens hex hashes to 12 characters; other values are returned unchanged.
+ * Must agree with `shortHash` in diff/diff.ts on hex input: `eventValues` asks
+ * whether an event message already carries the value, and the message was
+ * built with that function.
+ */
 export function shortValue(value: string): string {
   return isHash(value) ? value.slice(0, 12) : value;
+}
+
+/**
+ * The before/after pair a report prints under an event, or undefined when the
+ * event message already states the change and repeating it would be noise.
+ * One rule for every renderer: written twice, the text and markdown reports
+ * drifted apart on it.
+ */
+export function eventValues(event: Pick<DiffEvent, 'message' | 'before' | 'after'>): { before: string; after: string } | undefined {
+  if (event.before === undefined && event.after === undefined) return undefined;
+  if (event.before !== undefined && event.after !== undefined && event.message.includes(shortValue(event.before))) return undefined;
+  return {
+    before: event.before === undefined ? '(none)' : shortValue(event.before),
+    after: event.after === undefined ? '(none)' : shortValue(event.after),
+  };
+}
+
+function pad(text: string, width: number, align: 'left' | 'right' = 'left'): string {
+  if (text.length >= width) return text;
+  const fill = ' '.repeat(width - text.length);
+  return align === 'left' ? text + fill : fill + text;
+}
+
+/** Renders aligned columns; numeric cells are right-aligned and the last cell is never padded. */
+export function renderColumns(header: readonly string[], rows: readonly (readonly string[])[], indent: string = '  '): string[] {
+  const widths = header.map((h, i) => Math.max(h.length, ...rows.map((r) => (r[i] ?? '').length)));
+  const line = (cells: readonly string[], isHeader: boolean): string =>
+    indent +
+    cells
+      .map((cell, i) => {
+        const width = widths[i] ?? cell.length;
+        const numeric = !isHeader && /^\d+$/.test(cell);
+        return i === cells.length - 1 && !numeric ? cell : pad(cell, width, numeric ? 'right' : 'left');
+      })
+      .join('  ')
+      .trimEnd();
+  return [line(header, true), ...rows.map((row) => line(row, false))];
 }
 
 export function exitCodeMeaning(code: DiffResult['exitCode']): string {
@@ -92,13 +140,10 @@ function renderEvent(event: DiffEvent, paint: (s: string) => string): string[] {
   const scope = event.scope ? ` [${event.scope}]` : '';
   const out = [`  ${paint(label)}${event.subject}${scope}`];
   out.push(`  ${' '.repeat(15)}${event.message}`);
-  if (event.before !== undefined || event.after !== undefined) {
-    const before = event.before === undefined ? '(none)' : shortValue(event.before);
-    const after = event.after === undefined ? '(none)' : shortValue(event.after);
-    if (!(event.before !== undefined && event.after !== undefined && event.message.includes(shortValue(event.before)))) {
-      out.push(`  ${' '.repeat(15)}before: ${before}`);
-      out.push(`  ${' '.repeat(15)}after:  ${after}`);
-    }
+  const values = eventValues(event);
+  if (values !== undefined) {
+    out.push(`  ${' '.repeat(15)}before: ${values.before}`);
+    out.push(`  ${' '.repeat(15)}after:  ${values.after}`);
   }
   return out;
 }

@@ -15,10 +15,13 @@ Each module owns the files listed. Modules communicate only through `src/types.t
 ```
 src/
   types.ts                    shared types (contract; do not add module imports)
+  errors.ts                   ScriptlockError: code, exitCode, hint (dependency-free, like types.ts)
   index.ts                    public API re-exports
   cli.ts                      commander entry point; delegates to commands/*
   runner.ts                   which package manager runs this project, so a printed command is runnable
   commands/
+    context.ts                CommandContext, profile resolution, `plural`: what every command shares
+    snapshot.ts               snapshot file layer: schema, last.<profile>.json path, parse / read / write
     init.ts                   `scriptlock init`
     install-browser.ts        `scriptlock install-browser`
     scan.ts                   `scriptlock scan`
@@ -51,9 +54,10 @@ src/
     diff.ts                   Snapshot + Manifest -> DiffResult
     policy.ts                 severity matrix for gate and drift modes
   report/
-    text.ts                   terminal output (picocolors)
+    inventory.ts              the inventory model both report renderers format
+    text.ts                   terminal output (picocolors); aligned columns; before/after rule
     markdown.ts               markdown for PR comments and step summaries
-    json.ts                   machine output
+    json.ts                   machine output: diff result, inventory, snapshot serialisation
   history/
     store.ts                  append snapshot + diff under .scriptlock/history/<profile>/
 fixtures/
@@ -88,7 +92,7 @@ lookupEntity(url: string): ScriptEntity | undefined
 readManifest(path: string): Promise<Manifest>
 writeManifest(path: string, manifest: Manifest): Promise<void>
 emptyManifest(profile: string, url: string): Manifest
-findScriptEntry(manifest: Manifest, observed: ObservedScript): ManifestScript | undefined
+findScriptEntry(manifest: Manifest, observed: ObservedScript | string): ManifestScript | undefined
 findFrameEntry(manifest: Manifest, frame: FrameInfo): ManifestFrame | undefined
 isIgnored(manifest: Manifest, id: string): boolean
 approveScripts(manifest, snapshot, ids: string[], meta: ApproveMeta, defaults: IntegrityDefaults): Manifest
@@ -109,7 +113,12 @@ renderInventoryMarkdown(snapshot: Snapshot, manifest: Manifest): string
 
 // history
 appendHistory(dir: string, profile: string, snapshot: Snapshot, result?: DiffResult): Promise<string>
+
+// schemas (validation of the three files this tool reads)
+configSchema, manifestSchema, snapshotSchema
 ```
+
+`src/index.ts` exports exactly this list plus `src/types.ts` and `ScriptlockError`, and nothing else: while the package is 0.x that file is the whole supported surface. Everything else is internal, reachable only through a deep import, and may be renamed or removed in any release.
 
 ## 3. Collection
 
@@ -122,7 +131,11 @@ appendHistory(dir: string, profile: string, snapshot: Snapshot, result?: DiffRes
 Verified empirically against playwright-core 1.62.1 / Chromium 151:
 
 - Attach a CDP session to the page **before navigation** (`context.newCDPSession(page)`), enable `Debugger`, `Runtime`, `Network`. Every script V8 parses in that target arrives as `Debugger.scriptParsed`, including inline blocks, eval, `new Function`, blob:, module scripts and dynamically inserted tags.
-- On `frameattached`, try `context.newCDPSession(frame)`. If Playwright answers "This frame does not have a separate CDP session", the frame is in-process and already covered by the parent session. Otherwise it is an out-of-process iframe; enable the same domains on the new session. Dedicated and service workers are out of scope for v1 (Playwright exposes no CDP session for them); record their entry URLs from `Network` events with kind `worker` and no body hash.
+- Out-of-process iframes are attached **before they run**, with `Target.setAutoAttach` (`autoAttach: true`, `waitForDebuggerOnStart: true`, `flatten: false`) on every session. Each child target arrives as `Target.attachedToTarget` paused at start; the same domains are enabled on it and it is then resumed with `Runtime.runIfWaitingForDebugger`. Every target that was paused is resumed, wired or not, so an unwired worker never stalls the page.
+
+  Commands to a child travel over its parent as `Target.sendMessageToTarget` and replies and events come back as `Target.receivedMessageFromTarget`, dispatched by id (the `ChildSession` shim in `collector/session.ts`). `flatten: false` is required for that: playwright-core's public `CDPSession` has no per-`sessionId` send, so a flattened child could never be resumed. A child command is bounded by `browser.timeoutMs` and every command still waiting is rejected when the target detaches or the capture is disposed — a reply that will never arrive must not hang the scan.
+
+  The alternative — `context.newCDPSession(frame)` on `frameattached` — was rejected: it races the frame's own first scripts, so a script parsed inside a cross-origin payment iframe before the attach completes is silently absent from the inventory, which is the exact failure this tool exists to prevent. In-process iframes need no child session; they are covered by the parent. Dedicated and service workers are out of scope for v1 (no body is read); record their entry URLs from Playwright's worker events with kind `worker` and no body hash.
 - For each `scriptParsed`, fetch the source immediately with `Debugger.getScriptSource` (V8 evicts collected scripts; a late call fails with "No script for id"). Compute our own SHA-256 over the UTF-8 bytes of the returned source. Never store V8's `hash` field: it is computed over decoded UTF-16 and is not an SRI value.
 - `scriptParsed.url` is rewritten by an attacker-controlled `//# sourceURL=` comment (`hasSourceURL: true`). Take the real URL from `embedderName`, falling back to the matching `Network.requestWillBeSent` URL. Record the claimed URL in `sourceUrl` and never use it for identity.
 - `Network.requestWillBeSent` with `type: Script` provides `initiator` (`parser` with the document URL, or `script` with a stack whose top frame URL is the inserting script). Correlate to `scriptParsed` by URL. Response headers come from `Network.responseReceived`.
@@ -160,7 +173,7 @@ steps:
 
 Identity answers "is this the same script as before" independently of body changes.
 
-### 4.1 URL-addressed scripts (`external`, `blob`, `data`, `worker`)
+### 4.1 URL-addressed scripts (`external`, `blob`, `data`, `worker`, and `wasm` / `unknown` with a URL)
 
 `normalizeUrl(raw, cfg)`:
 
@@ -192,6 +205,17 @@ Position-based ids break when a block is inserted above. Use content structure i
 6. SHA-256 the result.
 
 A tokenizer that handles the above without a full parser is sufficient; document any known limitation (e.g. regex-vs-division ambiguity) in the module header. Framework hydration blocks such as `self.__next_f.push([1,"..."])` therefore hash stably across requests, while a change in the code itself changes the hash.
+
+### 4.4 WebAssembly and unknown
+
+A `Debugger.scriptParsed` with `scriptLanguage: "WebAssembly"` is kind `wasm`. It is executable code the engine parsed, so it belongs in the inventory like any script, but its *source text* is empty: the body is bytecode.
+
+- Body hash: `sha256Bytes` over the raw bytecode from `Debugger.getScriptSource` (base64 `bytecode` field), not `sha256` over the empty source text. `size` is the byte length of that bytecode.
+- Structural hash: the same value as `sha256`. There is no token stream to normalise, so `structural` integrity on a Wasm module is exactly `strict` rather than a weaker claim.
+- Identity: the normalised URL when the module has one (the ordinary rule of 4.1); otherwise `wasm:<frame origin>:<hash prefix 16>`, the 4.2 form with a byte-derived hash in place of the structural hash. `deriveId` receives the body hash as its `source`, so the prefix is a hash of that hash rather than of the bytecode directly; what matters is that it is deterministic in the bytes and never in the URL.
+- Integrity default: a Wasm module carries a body hash like any other script, so `approve` gives it the ordinary first-party / third-party default of section 6 — by its URL when it has one, by its frame origin when it does not. Only a module whose body was not captured falls to `url-only`.
+
+`unknown` is the fallback kind for anything the collector cannot classify and behaves like `wasm` throughout: the normalised URL when there is one, otherwise `unknown:<frame origin>:<hash prefix 16>`. Nothing produces it today; it exists so that a script kind a future engine reports lands in the inventory instead of being dropped.
 
 ## 5. Scope
 
@@ -279,7 +303,7 @@ A glob matching no observed script is a `SNAPSHOT_INVALID` error naming the glob
 
 Owner and justification are the evidence fields, so a value that is still a placeholder (`...`, or text wholly wrapped in `<>`, as printed by `diff`, `init` and the bundle hint) is refused rather than written.
 
-Integrity defaults applied by `approve` when `--integrity` is not given: first-party external (host equals main-frame host or a subdomain) -> `integrity.firstParty` (default `strict`); third-party external -> `integrity.thirdParty` (default `track`); inline -> `integrity.inline` (default `structural`); eval -> `integrity.eval` (default `structural`); `worker` (and any script whose body was not captured) -> `url-only` with method `none`, regardless of party, because there is no body hash to enforce. `approve` refuses `--integrity strict` or `--integrity structural` for such an entry. `integrityMethod` defaults otherwise: `hash-strict` for strict/structural, `source-tracked` for track/url-only.
+Integrity defaults applied by `approve` when `--integrity` is not given: first-party external (host equals main-frame host or a subdomain) -> `integrity.firstParty` (default `strict`); third-party external -> `integrity.thirdParty` (default `track`); inline -> `integrity.inline` (default `structural`); eval -> `integrity.eval` (default `structural`); `wasm` and `unknown` follow the same first-party / third-party rule as external, since they carry a body hash (section 4.4); `worker` (and any script whose body was not captured, whatever its kind) -> `url-only` with method `none`, regardless of party, because there is no body hash to enforce. `approve` refuses `--integrity strict` or `--integrity structural` for such an entry. `integrityMethod` defaults otherwise: `hash-strict` for strict/structural, `source-tracked` for track/url-only.
 
 ## 7. Diff semantics
 
@@ -379,12 +403,13 @@ profiles:
 - an inline classic script and an inline module script;
 - `/app.<hash>.js` first-party bundle where the hash and body can be switched by server option to simulate a deploy;
 - `/vendor.js?v=<n>` third-party style script with a cache buster;
-- a dynamically inserted `<script src>`, an `eval`, a `new Function`, a blob: script, a late tag inserted after 1500 ms;
+- a dynamically inserted `<script src>`, an `eval`, a `new Function`, a blob: script, a late tag inserted after `LATE_TAG_MS` (the tests derive their `settleMs` from that constant rather than repeating the number);
 - `/spoof.js` whose body ends with `//# sourceURL=https://js.stripe.com/v3`;
 - a same-origin iframe with its own inline and external script;
 - a cross-origin iframe on the `localhost` origin, configurable to act as `tpsp` (via `scope.tpsp: ["localhost"]` in the test config), containing its own scripts;
 - `/challenge` page that mimics a Cloudflare interstitial ("Just a moment...") for the blocked detector;
-- an optional dedicated worker entry `/worker.js`.
+- an optional dedicated worker entry `/worker.js`;
+- two `/assets/app.<hash>.js` chunks whose normalised ids collide, served only for `?collide=1`, for the identity-collision warning of 4.1 rule 3.
 
 Unit tests cover normalisation (every rule in section 4.1 with examples), structural hash stability and sensitivity, identity derivation, scope classification incl. configured globs, manifest read/write round trip and stable ordering, matching with globs, approve defaults, glob approvals (`approve --match`: one entry created and updated in place, a glob matching nothing refused, strict/structural refused for any wildcard glob, a glob broader than one directory refused, a scope-crossing glob refused without `--scope`, placeholder owner/justification refused, coverage evidence recorded, redundant entries reported and removed with `replace`, and an id covered by a glob approved on its own without touching the glob), glob narrowness and escaping, every row of the diff matrix, the content-hashed bundle hint, and report rendering snapshots.
 

@@ -90,7 +90,6 @@ export function normalizeStructure(source: string): string {
 
   /** Scan a numeric literal starting at `pos` (digit or `.` followed by digit). */
   function scanNumber(): void {
-    const start = pos;
     if (at() === '0' && /[xXoObB]/.test(at(1))) {
       pos += 2;
       while (pos < len && /[0-9A-Fa-f_]/.test(at())) pos++;
@@ -98,10 +97,9 @@ export function normalizeStructure(source: string): string {
       return;
     }
     while (pos < len && /[0-9_]/.test(at())) pos++;
-    if (at() === '.' && pos > start) {
-      pos++;
-      while (pos < len && /[0-9_]/.test(at())) pos++;
-    } else if (at() === '.' && pos === start) {
+    // The fractional part is scanned the same way whether digits preceded the
+    // dot (`1.5`) or not (`.5`).
+    if (at() === '.') {
       pos++;
       while (pos < len && /[0-9_]/.test(at())) pos++;
     }

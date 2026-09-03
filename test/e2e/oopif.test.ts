@@ -27,7 +27,7 @@ describe('out-of-process iframe capture', () => {
   it('keeps the parser initiator and response headers of a script in a cross-origin frame', async () => {
     const context = await browser.newContext();
     const page = await context.newPage();
-    const capture = await attachCapture(context, page);
+    const capture = await attachCapture(context, page, 30_000);
     try {
       await page.goto(`${server.origin}/`, { waitUntil: 'load', timeout: 30_000 });
       await page.waitForTimeout(1000);

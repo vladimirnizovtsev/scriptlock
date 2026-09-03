@@ -9,11 +9,13 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { DEFAULT_APP_HASH, defaultSecurityHeaders, start, type FixtureServer } from '../../fixtures/server.js';
+import { DEFAULT_APP_HASH, defaultSecurityHeaders, settleMsFor, start, type FixtureServer } from '../../fixtures/server.js';
 import { runApprove } from '../../src/commands/approve.js';
 import { runDiff } from '../../src/commands/diff.js';
 import { runReport } from '../../src/commands/report.js';
-import { lastSnapshotPath, runScan, type CommandContext } from '../../src/commands/scan.js';
+import type { CommandContext } from '../../src/commands/context.js';
+import { runScan } from '../../src/commands/scan.js';
+import { lastSnapshotPath } from '../../src/commands/snapshot.js';
 import { readManifest } from '../../src/manifest/io.js';
 import type { DiffEvent, DiffEventType, DiffResult, ManifestScript } from '../../src/types.js';
 
@@ -38,8 +40,8 @@ function ctx(): CommandContext {
     verbose: false,
     color: false,
     toolVersion: '0.0.0-test',
-    out: (text) => stdout.push(text),
-    err: (text) => stderr.push(text),
+    out: (text: string) => stdout.push(text),
+    err: (text: string) => stderr.push(text),
   };
 }
 
@@ -75,7 +77,7 @@ beforeAll(async () => {
       '  default:',
       `    url: ${server.origin}/`,
       '    wait: load',
-      '    settleMs: 2500',
+      `    settleMs: ${settleMsFor()}`,
       '    runs: 1',
       '    history: false',
       '',

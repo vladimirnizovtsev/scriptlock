@@ -11,7 +11,7 @@
  */
 import { appendFile, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { resultToJson } from '../report/json.js';
+import { resultToJson, snapshotToJson } from '../report/json.js';
 import type { DiffResult, Snapshot } from '../types.js';
 
 export interface HistoryIndexLine {
@@ -30,18 +30,7 @@ export function historyStem(snapshot: Snapshot): string {
   return iso.replace(/:/g, '-');
 }
 
-/** Snapshot as written to disk: identical shape, without script sources. */
-export function snapshotToJson(snapshot: Snapshot): Snapshot {
-  return {
-    ...snapshot,
-    scripts: snapshot.scripts.map((script) => {
-      const { source: _source, ...rest } = script;
-      return rest;
-    }),
-  };
-}
-
-export function indexLine(snapshot: Snapshot, result?: DiffResult): HistoryIndexLine {
+function indexLine(snapshot: Snapshot, result?: DiffResult): HistoryIndexLine {
   return {
     at: snapshot.finishedAt,
     url: snapshot.url,

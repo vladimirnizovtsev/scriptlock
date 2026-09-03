@@ -21,7 +21,7 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { ScriptlockError } from '../errors.js';
-import type { CommandContext } from './scan.js';
+import type { CommandContext } from './context.js';
 
 /** Installed when the command is given no browser names. */
 export const DEFAULT_BROWSERS = ['chromium'] as const;

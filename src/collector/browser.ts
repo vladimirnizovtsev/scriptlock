@@ -14,7 +14,7 @@
  * Playwright's error message wording.
  */
 import { chromium, type Browser, type LaunchOptions } from 'playwright-core';
-import { ScriptlockError } from '../errors.js';
+import { errorMessage, ScriptlockError } from '../errors.js';
 import { scriptlockCommand } from '../runner.js';
 import type { BrowserConfig } from '../types.js';
 
@@ -103,9 +103,6 @@ async function tryLaunch(options: LaunchOptions, what: string, hint: string, pre
   }
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message.split('\n')[0] ?? error.message : String(error);
-}
 
 /** Formats Vantage.browser, e.g. "chromium 151.0.7922.34 (headless-shell)". */
 export function describeBrowser(launched: LaunchedBrowser): string {
