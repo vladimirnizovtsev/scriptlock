@@ -6,6 +6,19 @@ All notable changes to this project are documented in this file. The format foll
 
 Nothing yet.
 
+## [0.2.1] - 2026-09-03
+
+Documentation release, with two corrections to what the tool prints about itself.
+
+### Changed
+
+- The README opens with a seven-step walkthrough against a live page, with the real output of each command, and everything that was there before follows as reference. It used to take a third of the document to learn what the tool was or how to run it. Reviewing the new draft by following it literally, rather than reading it, found that it could not be followed: the demo page had drifted into the state the last step describes, so a reader's own scan disagreed with every screenshot. The [demo storefront](https://github.com/vladimirnizovtsev/scriptlock-demo-shop) now serves a second page carrying one extra tag, so that step is a URL change and a rerun rather than a story.
+
+### Fixed
+
+- `scriptlock report` printed `source-tracked` as the integrity method of every `track` and `url-only` entry, ignoring what the entry actually recorded. An entry approved as `vendor-attested` or `sri` was described in the inventory as something else, in the document an assessor reads. It now prints the entry's own `integrityMethod`.
+- The error `approve --match` prints when a glob spans two scopes claimed that naming one scope leaves the scripts in the other scopes unapproved. It does not: the glob still authorises them, and each is reported as `scope-changed`. The hint now says so.
+
 ## [0.2.0] - 2026-09-03
 
 Numbered 0.2.0 rather than 0.1.1: it began as a one-line fix to the artifact upload, and the audit that followed turned it into added inputs, an added output, an added CLI flag and a change to how the scanner sends `browser.extraHeaders`. Added behaviour is a minor version, and calling it a patch would understate what a reader has to check.
@@ -85,6 +98,7 @@ First release.
 - Fixture site and server for e2e tests; unit tests for every rule in the design.
 - Documentation: README with limits, requirement mapping, evidence guidance and comparison; CONTRIBUTING, SECURITY.
 
-[Unreleased]: https://github.com/vladimirnizovtsev/scriptlock/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/vladimirnizovtsev/scriptlock/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/vladimirnizovtsev/scriptlock/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/vladimirnizovtsev/scriptlock/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/vladimirnizovtsev/scriptlock/releases/tag/v0.1.0

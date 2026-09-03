@@ -1,6 +1,6 @@
 {
   "name": "scriptlock",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Client-side script inventory and change detection for web pages. A lockfile for everything that executes in the browser.",
   "keywords": [
     "script-inventory",

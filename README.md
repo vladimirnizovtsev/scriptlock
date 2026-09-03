@@ -143,10 +143,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: vladimirnizovtsev/scriptlock@v0.2.0
+      - uses: vladimirnizovtsev/scriptlock@v0.2.1
         with:
           mode: gate
-          version: "0.2.0"
+          version: "0.2.1"
 
   drift:
     if: github.event_name != 'pull_request'
@@ -155,11 +155,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: vladimirnizovtsev/scriptlock@v0.2.0
+      - uses: vladimirnizovtsev/scriptlock@v0.2.1
         with:
           mode: drift
           history: "true"
-          version: "0.2.0"
+          version: "0.2.1"
 ```
 
 ![a GitHub Actions run summary for the demo repository: gate skipped on a manual run, drift failed](https://raw.githubusercontent.com/vladimirnizovtsev/scriptlock/main/media/05-ci-red-check.png)
@@ -510,13 +510,13 @@ The repository root contains a composite action. It validates its inputs, instal
 The action is versioned by its git ref, not by npm: the runner reads `action.yml` from the ref in `uses:`, so a fix to the action reaches you when you change that ref. Pin it to a full commit SHA (best) or to a release tag; the `version:` input separately pins the npm package that produces the evidence.
 
 ```yaml
-- uses: vladimirnizovtsev/scriptlock@v0.2.0
+- uses: vladimirnizovtsev/scriptlock@v0.2.1
   with:
     profile: default          # profile from scriptlock.config.yaml
     mode: gate                # gate | drift
     config: scriptlock.config.yaml  # default is empty: look up .yaml, then .yml
     node-version: "22"
-    version: "0.2.0"          # npm version of the CLI; "latest" is not reproducible
+    version: "0.2.1"          # npm version of the CLI; "latest" is not reproducible
     history: "false"          # also write .scriptlock/history/<profile>/
     working-directory: .      # the manifest and .scriptlock/ resolve against this
     summary: "true"           # publish the report to the job summary and the log
