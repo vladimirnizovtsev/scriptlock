@@ -25,7 +25,9 @@ export interface LaunchedBrowser {
   distribution: string;
 }
 
-const INSTALL_HINT = 'npx playwright-core install chromium';
+const INSTALL_HINT =
+  'Install it with the package manager this project uses: npx playwright-core install chromium, ' +
+  'pnpm exec playwright-core install chromium, or yarn playwright-core install chromium';
 const CHANNEL_HINT = 'Install that browser on this machine, or set browser.channel to chromium, chrome or msedge (or browser.executablePath to a Chromium-based binary)';
 
 function executablePathHint(executablePath: string): string {

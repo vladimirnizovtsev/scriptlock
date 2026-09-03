@@ -4,7 +4,10 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- The README's install step covers npm, pnpm and yarn, and says which command runs the CLI under each. It assumed npm, and following it in a pnpm or yarn project fails inside npm itself with `Cannot read properties of null (reading 'matches')` and no explanation. Found by a reader trying it on their own site.
+- The error for a missing browser named only the npm command. It now names the pnpm and yarn ones too, which matters because `playwright-core` is a transitive dependency and pnpm does not hoist it where the npm command expects it.
 
 ## [0.2.1] - 2026-09-03
 

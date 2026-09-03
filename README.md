@@ -18,10 +18,30 @@ This is a complete run against a live page, and every screenshot below is real o
 
 Node 22 or later, in a directory that has a `package.json`. Scriptlock ships no browser, so Chromium is installed once.
 
+**npm**
+
 ```sh
 npm install --save-dev scriptlock
 npx playwright-core install chromium
 ```
+
+**pnpm**
+
+```sh
+pnpm add -D scriptlock
+pnpm exec playwright-core install chromium
+```
+
+**yarn**
+
+```sh
+yarn add -D scriptlock
+yarn playwright-core install chromium
+```
+
+Use the one your project already uses. Running `npm install` in a project whose lockfile belongs to pnpm or yarn can fail inside npm itself, with `Cannot read properties of null (reading 'matches')` and no explanation.
+
+The rest of this walkthrough writes `npx scriptlock`. With pnpm that is `pnpm exec scriptlock`, with yarn `yarn scriptlock`.
 
 ### 2. Say which page to watch
 

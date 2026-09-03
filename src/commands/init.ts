@@ -51,8 +51,8 @@ version: 1
 
 browser:
   # Playwright channel: "chromium" (the Playwright-managed build, installed with
-  # \`npx playwright-core install chromium\`), "chrome" or "msedge". Or set executablePath
-  # to a Chromium-based binary; it overrides channel.
+  # \`npx playwright-core install chromium\`, or the pnpm or yarn equivalent), "chrome" or
+  # "msedge". Or set executablePath to a Chromium-based binary; it overrides channel.
   channel: chromium
   headless: true
   viewport: { width: ${DEFAULT_VIEWPORT.width}, height: ${DEFAULT_VIEWPORT.height} }
