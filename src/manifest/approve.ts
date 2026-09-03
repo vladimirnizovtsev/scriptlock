@@ -432,7 +432,7 @@ export function approveMatch(
       'UNSUPPORTED',
       `The glob ${glob} matches scripts in ${scopes.length} scopes (${scopes.join(', ')}) and one entry records one scope, so it would authorise scripts outside the scope it names`,
       {
-        hint: `Narrow the glob, or name the scope the entry stands for with --scope ${scopes[0] as string} (the scripts in the other scopes then stay unapproved)`,
+        hint: `Narrow the glob, or name the scope the entry stands for with --scope ${scopes[0] as string} (the glob still authorises the scripts in the other scopes, and each is reported as scope-changed)`,
       },
     );
   }

@@ -94,7 +94,7 @@ describe('renderInventoryMarkdown', () => {
     expect(md).toContain('#### Owner / category: web / functional');
     expect(md).toContain('#### Unapproved');
     expect(md).toContain(`| \`${APP_ID}\` | external | approved | strict (hash-strict) |`);
-    expect(md).toContain(`| \`${STRIPE_ID}\` | external | approved | not assured (source-tracked) [track] | Stripe (utility) |`);
+    expect(md).toContain(`| \`${STRIPE_ID}\` | external | approved | not assured (vendor-attested) [track] | Stripe (utility) |`);
     expect(md).toContain('| `https://shop.example.com/old.js` | external | stale | strict (hash-strict) |');
     expect(md).toContain(`| \`https://unknown.example/u.js\` | external | unapproved | none |  | \`${APP_ID}\` |`);
     expect(md).not.toContain('eval:x:1');

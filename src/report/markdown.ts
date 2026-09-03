@@ -147,7 +147,7 @@ export function integrityLabel(entry: ManifestScript | undefined): string {
   if (!entry) return 'none';
   if (entry.kind === 'worker') return 'body not captured (url-only)';
   if (entry.integrity === 'track' || entry.integrity === 'url-only') {
-    return `not assured (source-tracked) [${entry.integrity}]`;
+    return `not assured (${entry.integrityMethod}) [${entry.integrity}]`;
   }
   return `${entry.integrity} (${entry.integrityMethod})`;
 }
