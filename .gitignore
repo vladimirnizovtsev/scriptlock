@@ -6,8 +6,10 @@ node_modules/
 dist/
 coverage/
 
-# Local scan output
-.scriptlock/history/
+# Local scan output. The snapshot is a complete inventory of every script URL on
+# the scanned page, so the whole directory stays out of the repository; only
+# scriptlock.config.yaml and the manifest (scriptlock.lock.yaml) are committed.
+.scriptlock/
 *.scriptlock-snapshot.json
 
 # OS and editor noise

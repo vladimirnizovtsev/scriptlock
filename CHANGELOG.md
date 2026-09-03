@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.1.0] - 2026-09-03
+
+First release.
+
 ### Added
 
 - `scriptlock init`: writes `scriptlock.config.yaml` with a `default` profile.
@@ -21,8 +27,15 @@ All notable changes to this project are documented in this file. The format foll
 - Flow DSL (`goto`, `click`, `fill`, `select`, `waitFor`, `wait`, `press`, `screenshot`) and module flows (`steps: ./flow.ts`).
 - Multiple runs per scan unioned by id, so intermittent tags are not reported as removed after one quiet run.
 - Bot-management challenge page detection (Cloudflare `cf-mitigated` header and challenge markup, Akamai SEC-CPT and block pages, DataDome, PerimeterX, HTTP 403/428/429/503) reported as `blocked` with exit code 2; `scriptlock scan` also exits 2 on a blocked page. Vendor sensor snippets on ordinary 200 pages are not treated as blocked.
-- Composite GitHub Action (`action.yml`) and example workflows for a weekly drift run and a pull request deploy gate.
+- Guards against a green pipeline built on nothing: a main document outside 200-299 is recorded in `snapshot.warnings` and printed in red by `scriptlock scan`; `scriptlock approve` refuses to create a manifest from a snapshot with no scripts and no security headers; `scriptlock diff` reports a manifest with no script entry as an `empty-manifest` fail in both modes. A typo'd or temporarily unreachable profile URL can no longer produce a passing gate.
+- URL normalisation keeps a file name whose whole stem is a hash (`chunks/9c1a4f0b8d2e.js`), so sibling chunks do not collapse into one identity; when two observed URLs still normalise to the same id, the scan records a warning naming both rather than dropping one silently.
+- `scriptlock init` adds `.scriptlock/` to an existing `.gitignore` and prints the line when there is none: the snapshot is a full inventory of every script URL on the scanned page and is not a committed artifact.
+- `scriptlock diff` writes a blocked scan to `.scriptlock/blocked.<profile>.json` instead of `.scriptlock/last.<profile>.json`, so a challenge page cannot destroy the last good snapshot that `approve` and `report` read.
+- The `approve --match` command printed as a diff hint carries the `--profile` and `--config` of the run that printed it, so a pasted command cannot land on another profile's manifest.
+- `scriptlock` refuses to run on a Node older than `engines.node` with a message naming the version, and printing help because no command was given exits 2 (usage error) rather than 1 (findings).
+- Composite GitHub Action (`action.yml`) and example workflows for a weekly drift run and a pull request deploy gate. The artifact upload is opt-out (`artifact: "false"`) and its retention is an input defaulting to 90 days, the maximum GitHub allows on public repositories and the Free plan.
 - Fixture site and server for e2e tests; unit tests for every rule in the design.
 - Documentation: README with limits, requirement mapping, evidence guidance and comparison; CONTRIBUTING, SECURITY.
 
-[Unreleased]: https://github.com/vladimirnizovtsev/scriptlock/compare/main...HEAD
+[Unreleased]: https://github.com/vladimirnizovtsev/scriptlock/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/vladimirnizovtsev/scriptlock/releases/tag/v0.1.0

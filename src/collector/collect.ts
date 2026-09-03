@@ -309,6 +309,13 @@ function buildRun(capture: Capture, config: ScriptlockConfig, finalUrl: string, 
   const documentStatus = mainDoc?.status ?? 0;
   const headers = mainDoc === undefined ? {} : extractSecurityHeaders(mainDoc.headers);
   if (mainDoc === undefined) warnings.push('no main document response was observed; status and headers are unknown');
+  else if (documentStatus < 200 || documentStatus > 299) {
+    // A typo in profile.url or a page that is temporarily down otherwise yields
+    // an empty but perfectly "clean" inventory (DESIGN.md 3.3).
+    warnings.push(
+      `the main document ${finalUrl} returned HTTP ${documentStatus}; this is probably an error page, so the inventory is not the page you meant to scan`,
+    );
+  }
 
   // Network indexes by URL (first request wins).
   const requestByUrl = new Map<string, RawRequest>();
@@ -416,6 +423,13 @@ function buildRun(capture: Capture, config: ScriptlockConfig, finalUrl: string, 
     if (script.rawUrl !== undefined && !idByUrl.has(script.rawUrl)) idByUrl.set(script.rawUrl, id);
     const duplicate = scripts.find((existing) => existing.id === id);
     if (duplicate !== undefined) {
+      if (script.rawUrl !== undefined && duplicate.rawUrl !== undefined && script.rawUrl !== duplicate.rawUrl) {
+        // Two different files normalised to one identity, so only the first is
+        // in the inventory. Never silent: an executed script must not vanish.
+        warnings.push(
+          `${duplicate.rawUrl} and ${script.rawUrl} normalise to the same identity ${id}; only the first is recorded, so the inventory is missing one script (set identity.collapseHashes to false, or keepQuery the parameter that distinguishes them)`,
+        );
+      }
       // Same identity in two frames of one run: keep the strictest scope so a
       // script that also runs in the merchant frame still gates (DESIGN.md 5).
       if (SCOPE_PRIORITY[script.scope] < SCOPE_PRIORITY[duplicate.scope]) {

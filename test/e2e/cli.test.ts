@@ -135,6 +135,30 @@ function approvedManifest(): Manifest {
   return manifest;
 }
 
+/**
+ * A manifest that authorises something other than the snapshot's script, for
+ * the cases that want exactly one `new` event. An empty manifest would add an
+ * `empty-manifest` fail of its own; the entry is ignored so it is not reported
+ * as removed either.
+ */
+function unrelatedManifest(): Manifest {
+  const manifest = emptyManifest('default', MAIN_URL);
+  manifest.scripts.push({
+    id: 'https://baseline.example/baseline.js',
+    kind: 'external',
+    scope: 'merchant',
+    integrity: 'url-only',
+    integrityMethod: 'none',
+    owner: 'web',
+    category: 'functional',
+    justification: 'Baseline entry so the manifest is not empty',
+    approvedBy: 'tester',
+    approvedAt: '2026-09-01',
+  });
+  manifest.ignore.push('https://baseline.example/*');
+  return manifest;
+}
+
 function writeConfig(dir: string, url: string, extra: string[] = []): void {
   writeFileSync(
     join(dir, 'scriptlock.config.yaml'),
@@ -189,6 +213,13 @@ describe('scriptlock CLI', () => {
     expect(badChoice.stderr).toContain('--format');
   });
 
+  it('no command is a usage error (exit 2), never exit 1, which means findings', () => {
+    // In CI a dropped argument must not be indistinguishable from a real finding.
+    const run = scriptlock(dir, []);
+    expect(run.status).toBe(2);
+    expect(`${run.stdout}${run.stderr}`).toContain('Usage: scriptlock');
+  });
+
   it('init writes the configuration, refuses to overwrite it and honours --force and --url', () => {
     const init = scriptlock(dir, ['init']);
     expect(init.status).toBe(0);
@@ -207,6 +238,38 @@ describe('scriptlock CLI', () => {
     const forced = scriptlock(dir, ['init', '--force', '--url', 'http://shop.example.test/checkout']);
     expect(forced.status).toBe(0);
     expect(parseConfig(readFileSync(file, 'utf8'), { env: {} }).profiles['default']?.url).toBe('http://shop.example.test/checkout');
+    // Nothing to edit when the URL came from --url.
+    expect(forced.stdout).not.toContain('Edit the profile URL');
+    // Every printed command must run as printed: the placeholder guard refuses "<team>".
+    expect(forced.stdout).not.toContain('<team>');
+    expect(forced.stdout).toContain('--owner web');
+  });
+
+  it('init keeps scan output out of the repository', () => {
+    const withIgnore = realpathSync(mkdtempSync(join(tmpdir(), 'scriptlock-ignore-')));
+    const without = realpathSync(mkdtempSync(join(tmpdir(), 'scriptlock-noignore-')));
+    try {
+      writeFileSync(join(withIgnore, '.gitignore'), 'node_modules/\n');
+      const added = scriptlock(withIgnore, ['init']);
+      expect(added.status).toBe(0);
+      const ignore = readFileSync(join(withIgnore, '.gitignore'), 'utf8');
+      expect(ignore).toContain('node_modules/');
+      expect(ignore.split('\n').map((line) => line.trim())).toContain('.scriptlock/');
+      expect(added.stdout).toContain('added .scriptlock/ to .gitignore');
+
+      // Idempotent: a second init does not append the rule twice.
+      scriptlock(withIgnore, ['init', '--force']);
+      expect(readFileSync(join(withIgnore, '.gitignore'), 'utf8').match(/^\.scriptlock\/$/gm)).toHaveLength(1);
+
+      // No .gitignore is the repository owner's decision; print the rule, create nothing.
+      const printed = scriptlock(without, ['init']);
+      expect(printed.status).toBe(0);
+      expect(existsSync(join(without, '.gitignore'))).toBe(false);
+      expect(printed.stdout).toContain('.scriptlock/');
+    } finally {
+      rmSync(withIgnore, { recursive: true, force: true });
+      rmSync(without, { recursive: true, force: true });
+    }
   });
 
   it('scan without a configuration fails with exit code 2, an error line and a hint', () => {
@@ -228,6 +291,42 @@ describe('scriptlock CLI', () => {
     const badCategory = scriptlock(dir, ['approve', '--all-new', '--category', 'nonsense']);
     expect(badCategory.status).toBe(2);
     expect(badCategory.stderr).toContain('--category');
+  });
+
+  it('a typo’d URL cannot produce a green pipeline: approve refuses an empty snapshot, diff fails an empty manifest', () => {
+    const work = realpathSync(mkdtempSync(join(tmpdir(), 'scriptlock-emptyrun-')));
+    try {
+      writeConfig(work, MAIN_URL);
+      // What a 404 or a page that never loaded leaves behind.
+      const empty = syntheticSnapshot({ documentStatus: 404, scripts: [], headers: {} });
+      writeFileSync(join(work, 'empty.json'), JSON.stringify(empty, null, 2));
+
+      const approve = scriptlock(work, [
+        'approve',
+        '--all-new',
+        '--snapshot',
+        'empty.json',
+        '--owner',
+        'web',
+        '--category',
+        'functional',
+        '--justification',
+        'Initial inventory of the checkout page, reviewed in PR #123',
+      ]);
+      expect(approve.status).toBe(2);
+      expect(approve.stderr).toContain('recorded no scripts and no security headers');
+      expect(approve.stderr).toContain('HTTP 404');
+      expect(existsSync(join(work, 'scriptlock.lock.yaml'))).toBe(false);
+
+      // Even if an empty manifest reaches the repository some other way, the gate fails.
+      writeFileSync(join(work, 'scriptlock.lock.yaml'), serialiseManifest(emptyManifest('default', MAIN_URL)));
+      const gate = scriptlock(work, ['diff', '--gate', '--snapshot', 'empty.json']);
+      expect(gate.status).toBe(1);
+      expect(gate.stdout).toContain('empty-manifest');
+      expect(gate.stdout).not.toContain('clean: no findings');
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
   });
 
   describe('diff exit codes from a snapshot file', () => {
@@ -260,7 +359,7 @@ describe('scriptlock CLI', () => {
     });
 
     it('exits 1 on a new merchant script and renders json and markdown', () => {
-      writeFileSync(join(work, 'scriptlock.lock.yaml'), serialiseManifest(emptyManifest('default', MAIN_URL)));
+      writeFileSync(join(work, 'scriptlock.lock.yaml'), serialiseManifest(unrelatedManifest()));
       const text = scriptlock(work, ['diff', '--snapshot', snapshotFile]);
       expect(text.status).toBe(1);
       expect(text.stdout).toContain('FAIL (1)');

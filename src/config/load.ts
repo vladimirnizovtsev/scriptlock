@@ -9,6 +9,12 @@
  * naming the variable and the YAML path. Limitations: no `${VAR:-default}`
  * syntax and no escape for a literal `${`; only the two documented file names
  * are searched, and only in `cwd` (no parent directory walk).
+ *
+ * Interpolation is not redaction. A `fill` step's value is kept out of every
+ * output (collector/steps.ts) because it may be a secret, but `profile.url` is
+ * written verbatim into the snapshot, every report and the CI artifact. A
+ * token must not live in a URL; `browser.extraHeaders` and `browser.storageState`
+ * exist for authentication. The README says the same under Configuration.
  */
 import { access, readFile } from 'node:fs/promises';
 import path from 'node:path';

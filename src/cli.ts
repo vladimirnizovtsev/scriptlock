@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * Commander entry point (DESIGN.md section 8). Owns argument parsing, the
  * global options (--config, --verbose, --no-color), building the
@@ -19,6 +20,7 @@ import { APPROVABLE_SCOPES, INTEGRITY_METHODS, INTEGRITY_POLICIES, runApprove, S
 import { DIFF_FORMATS, runDiff, type DiffFormat } from './commands/diff.js';
 import { runInit } from './commands/init.js';
 import { REPORT_FORMATS, runReport, type ReportFormat } from './commands/report.js';
+import { DEFAULT_PROFILE_URL } from './config/schema.js';
 import { runScan, type CommandContext } from './commands/scan.js';
 import type { IntegrityMethod, IntegrityPolicy, Scope, ScriptCategory } from './types.js';
 
@@ -35,6 +37,20 @@ interface GlobalOptions {
 
 interface CliState {
   exitCode: number;
+}
+
+/** Minimum Node major version; must agree with `engines.node` in package.json. */
+export const MIN_NODE_MAJOR = 22;
+
+/**
+ * Message for a Node older than `MIN_NODE_MAJOR`, or undefined when the
+ * runtime is supported. `engines` is advisory in npm's default configuration,
+ * so without this the failure is an unexplained crash somewhere later.
+ */
+export function unsupportedNodeMessage(version: string = process.versions.node): string | undefined {
+  const major = Number.parseInt(version.split('.')[0] ?? '', 10);
+  if (!Number.isFinite(major) || major >= MIN_NODE_MAJOR) return undefined;
+  return `scriptlock requires Node ${MIN_NODE_MAJOR} or later; this is Node ${version}`;
 }
 
 /** Version from package.json (next to dist/ or src/). */
@@ -82,7 +98,7 @@ export function buildProgram(state: CliState, io: CliIo, version: string = packa
     .option('--no-color', 'disable coloured output (NO_COLOR is honoured as well)')
     .addHelpText(
       'after',
-      '\nExit codes: 0 clean, 1 findings at fail severity (or no manifest yet), 2 run error (blocked scan, navigation failure, invalid configuration, browser missing).',
+      '\nExit codes: 0 clean, 1 findings at fail severity (or no manifest yet), 2 run error (blocked scan, navigation failure, invalid configuration, browser missing, usage error, unsupported Node).',
     )
     .exitOverride()
     .configureOutput({ writeOut: io.stdout, writeErr: io.stderr })
@@ -105,10 +121,13 @@ export function buildProgram(state: CliState, io: CliIo, version: string = packa
   program
     .command('init')
     .description('write scriptlock.config.yaml with a "default" profile')
-    .option('--url <url>', 'URL of the default profile', 'https://shop.example.com/checkout')
+    .option('--url <url>', 'URL of the default profile', DEFAULT_PROFILE_URL)
     .option('--force', 'overwrite an existing configuration file')
-    .action(async (options: { url: string; force?: boolean }) => {
-      await runInit(context(), { url: options.url, force: options.force === true });
+    .action(async function (this: Command, options: { url: string; force?: boolean }) {
+      // Only a URL the user actually passed counts, so init can skip telling
+      // them to edit a URL they have just given.
+      const fromFlag = this.getOptionValueSource('url') === 'cli';
+      await runInit(context(), { ...(fromFlag ? { url: options.url } : {}), force: options.force === true });
     });
 
   program
@@ -230,6 +249,12 @@ export function buildProgram(state: CliState, io: CliIo, version: string = packa
 
 /** Parses `argv` (including the node and script entries) and returns the exit code. */
 export async function main(argv: readonly string[], io: CliIo = defaultIo()): Promise<number> {
+  const unsupported = unsupportedNodeMessage();
+  if (unsupported !== undefined) {
+    io.stderr(`error: ${unsupported}\n`);
+    io.stderr('hint: install Node 22 or later (Node 20 reached end of life on 30 April 2026)\n');
+    return 2;
+  }
   const state: CliState = { exitCode: 0 };
   const program = buildProgram(state, io);
   const verbose = argv.includes('--verbose');
@@ -237,10 +262,12 @@ export async function main(argv: readonly string[], io: CliIo = defaultIo()): Pr
     await program.parseAsync([...argv]);
   } catch (error) {
     if (error instanceof CommanderError) {
-      // --help and --version are not errors. Help shown because no command was given keeps
-      // commander's exit code (1). Usage errors were already printed by commander.
+      // --help and --version are not errors. Help shown because no command was
+      // given is a usage error (exit 2), never 1: exit code 1 means findings,
+      // and in CI a dropped argument must not look like a clean-but-failing
+      // gate. Usage errors were already printed by commander.
       if (error.code === 'commander.helpDisplayed' || error.code === 'commander.version') return 0;
-      if (error.code === 'commander.help') return error.exitCode === 0 ? 0 : 1;
+      if (error.code === 'commander.help') return error.exitCode === 0 ? 0 : 2;
       return 2;
     }
     if (isScriptlockError(error)) {

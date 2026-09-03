@@ -4,7 +4,9 @@
  * append history, and return the exit code (0 clean, 1 findings, 2 blocked).
  * Without a manifest it prints instructions to run `approve --all-new` and
  * returns 1. A scan performed here also refreshes `.scriptlock/last.<profile>.json`
- * so `scriptlock approve` can act on what the diff just reported.
+ * so `scriptlock approve` can act on what the diff just reported; a blocked
+ * scan is written to `.scriptlock/blocked.<profile>.json` instead, so a
+ * challenge page cannot destroy the last good snapshot.
  *
  * Limitations: with `--out` the report is written in full (also on exit code
  * 1 or 2) and only a one-line summary is printed; history is written only when
@@ -14,7 +16,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { scan } from '../collector/collect.js';
 import { manifestPathFor } from '../config/load.js';
-import { diff } from '../diff/diff.js';
+import { diff, type HintContext } from '../diff/diff.js';
 import { isScriptlockError } from '../errors.js';
 import { appendHistory } from '../history/store.js';
 import { readManifest } from '../manifest/io.js';
@@ -59,6 +61,11 @@ export interface DiffCommandResult {
 /** `.scriptlock/history` under `cwd`. */
 export function historyDir(cwd: string): string {
   return path.join(cwd, '.scriptlock', 'history');
+}
+
+/** `.scriptlock/blocked.<profile>.json` under `cwd`: a blocked scan, kept out of `last.<profile>.json`. */
+export function blockedSnapshotPath(cwd: string, profile: string): string {
+  return path.join(cwd, '.scriptlock', `blocked.${profile}.json`);
 }
 
 export function renderReport(result: DiffResult, format: DiffFormat, color: boolean): string {
@@ -112,7 +119,16 @@ export async function runDiff(ctx: CommandContext, opts: DiffCommandOptions): Pr
     };
     if (ctx.verbose) scanOptions.onProgress = (message) => ctx.err(`  ${message}`);
     snapshot = await scan(scanOptions);
-    snapshotPath = lastSnapshotPath(ctx.cwd, opts.profile);
+    if (snapshot.blocked === undefined) {
+      snapshotPath = lastSnapshotPath(ctx.cwd, opts.profile);
+    } else {
+      // A challenge page must not overwrite the last good snapshot that
+      // `approve` and `report` read; it is kept as evidence under its own name.
+      snapshotPath = blockedSnapshotPath(ctx.cwd, opts.profile);
+      ctx.err(
+        `the scan was blocked (${snapshot.blocked.vendor}); writing ${snapshotPath} and leaving ${lastSnapshotPath(ctx.cwd, opts.profile)} untouched`,
+      );
+    }
     await writeSnapshot(snapshotPath, snapshot);
     if (ctx.verbose) ctx.err(`snapshot written to ${snapshotPath}`);
   }
@@ -127,7 +143,11 @@ export async function runDiff(ctx: CommandContext, opts: DiffCommandOptions): Pr
     return { exitCode: 1, snapshot, snapshotPath, manifestPath, report: '' };
   }
 
-  const result = diff({ snapshot, manifest, mode: opts.mode, identity: loaded.config.identity });
+  // Hints are printed as ready-to-paste commands, so they must name the same
+  // profile and configuration file this run used.
+  const hintContext: HintContext = { profile: opts.profile };
+  if (ctx.configPath !== undefined) hintContext.config = ctx.configPath;
+  const result = diff({ snapshot, manifest, mode: opts.mode, identity: loaded.config.identity, hintContext });
   for (const warning of result.warnings ?? []) ctx.err(`warning: ${warning}`);
 
   const report = renderReport(result, format, ctx.color && opts.out === undefined);

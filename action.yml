@@ -2,9 +2,11 @@
 # Installs Node and scriptlock, installs Chromium with the CLI's bundled playwright-core,
 # runs `scriptlock diff`, writes the
 # markdown report to the job summary and the text report to the log, uploads .scriptlock/
-# as a run artifact and exits with Scriptlock's own exit code (0 clean, 1 findings, 2 run error).
+# as a run artifact (unless `artifact: "false"`) and exits with Scriptlock's own exit code
+# (0 clean, 1 findings, 2 run error).
 # Known limitations: a Linux runner with apt is assumed for `--with-deps`; the scan runs
-# once and both reports are rendered from that single snapshot.
+# once and both reports are rendered from that single snapshot; on a public repository the
+# uploaded artifact is downloadable by anyone and GitHub clamps its retention to 90 days.
 name: Scriptlock
 description: Script inventory and change detection for web pages. Runs scriptlock diff and publishes the report.
 author: Vladimir Nizovtsev
@@ -42,6 +44,21 @@ inputs:
     description: Directory containing scriptlock.config.yaml and the manifest.
     required: false
     default: "."
+  artifact:
+    description: >-
+      Upload .scriptlock/ as a run artifact (true or false). The snapshot lists every script URL
+      on the scanned page, including query strings, plus the final URL and the full
+      content-security-policy. On a public repository a run artifact is downloadable by anyone,
+      so set this to false when the scanned page must not be described publicly.
+    required: false
+    default: "true"
+  retention-days:
+    description: >-
+      Retention of the uploaded artifact in days. GitHub clamps this to the repository maximum
+      (90 days on public repositories and the Free plan) and only warns, so a longer evidence
+      trail needs `history: true` with the files committed, or an archive outside Actions.
+    required: false
+    default: "90"
 
 outputs:
   exit-code:
@@ -76,6 +93,7 @@ runs:
       env:
         SCRIPTLOCK_MODE: ${{ inputs.mode }}
         SCRIPTLOCK_HISTORY: ${{ inputs.history }}
+        SCRIPTLOCK_ARTIFACT: ${{ inputs.artifact }}
       run: |
         case "$SCRIPTLOCK_MODE" in
           gate|drift) ;;
@@ -84,6 +102,10 @@ runs:
         case "$SCRIPTLOCK_HISTORY" in
           true|false) ;;
           *) echo "error: history must be true or false, got '$SCRIPTLOCK_HISTORY'" >&2; exit 2 ;;
+        esac
+        case "$SCRIPTLOCK_ARTIFACT" in
+          true|false) ;;
+          *) echo "error: artifact must be true or false, got '$SCRIPTLOCK_ARTIFACT'" >&2; exit 2 ;;
         esac
 
     - name: Scan
@@ -139,10 +161,10 @@ runs:
         scriptlock "${args[@]}"
 
     - name: Upload .scriptlock as a run artifact
-      if: always()
+      if: always() && inputs.artifact == 'true'
       uses: actions/upload-artifact@v7
       with:
         name: scriptlock-${{ inputs.profile }}-${{ github.job }}
         path: ${{ inputs.working-directory }}/.scriptlock
         if-no-files-found: warn
-        retention-days: 400
+        retention-days: ${{ inputs.retention-days }}

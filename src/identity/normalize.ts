@@ -7,6 +7,11 @@
  * path tokens collapsed to `[hash]`, cache-buster query parameters removed and
  * the remaining parameters sorted by name with their original encoding kept.
  *
+ * A file name whose stem is nothing but hash tokens (`chunks/9c1a4f0b8d2e.js`)
+ * is left intact: collapsing it would give every chunk in the directory the
+ * same identity, so all but the first would vanish from the inventory. Such a
+ * directory is authorised with one `approve --match` entry instead.
+ *
  * Limitations: input that the WHATWG URL parser rejects is returned trimmed
  * but otherwise unchanged. Query parameter names are compared case
  * sensitively after percent-decoding. The 16+ character alphanumeric hash rule
@@ -50,11 +55,40 @@ function isHashToken(token: string): boolean {
   return LONG_TOKEN.test(token) && HAS_DIGIT.test(token);
 }
 
+/** Replace every hash-like token, keeping the delimiters in place. */
+function collapseTokens(text: string): string {
+  // Split keeping delimiters so the text can be reassembled verbatim.
+  const parts = text.split(/([./_-])/);
+  return parts.map((part) => (isHashToken(part) ? HASH_PLACEHOLDER : part)).join('');
+}
+
+/** True when every token of `stem` is a hash, so collapsing leaves nothing stable. */
+function isAllHash(stem: string): boolean {
+  const tokens = stem.split(/[./_-]/).filter((token) => token !== '');
+  return tokens.length > 0 && tokens.every((token) => isHashToken(token));
+}
+
+/**
+ * Collapse hashes in one file name. A stem with a stable token next to the
+ * hash (`app.3f9c2a1b.js`) collapses to `app.[hash].js`; a stem that is
+ * nothing but hash tokens (`9c1a4f0b8d2e.js`) is kept verbatim, because
+ * collapsing it would merge every chunk of the directory into one identity and
+ * drop all but the first from the inventory (DESIGN.md 4.1).
+ */
+function collapseFileName(file: string): string {
+  const dot = file.lastIndexOf('.');
+  const stem = dot > 0 ? file.slice(0, dot) : file;
+  const suffix = dot > 0 ? file.slice(dot) : '';
+  return (isAllHash(stem) ? stem : collapseTokens(stem)) + collapseTokens(suffix);
+}
+
 /** Replace hash-like tokens in a URL path, keeping every delimiter in place. */
 export function collapsePathHashes(pathname: string): string {
-  // Split keeping delimiters so the path can be reassembled verbatim.
-  const parts = pathname.split(/([./_-])/);
-  return parts.map((part) => (isHashToken(part) ? HASH_PLACEHOLDER : part)).join('');
+  const slash = pathname.lastIndexOf('/');
+  if (slash === -1) return collapseFileName(pathname);
+  // Directory tokens always collapse: the file name next to them keeps the
+  // path distinguishable, so nothing is lost.
+  return collapseTokens(pathname.slice(0, slash + 1)) + collapseFileName(pathname.slice(slash + 1));
 }
 
 function safeDecode(text: string): string {

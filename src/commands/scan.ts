@@ -299,11 +299,11 @@ export function renderScanSummary(snapshot: Snapshot, file: string, opts: { colo
   const lines: string[] = [];
 
   lines.push(`${c.bold('scriptlock scan')} ${snapshot.profile} ${snapshot.url}`);
-  lines.push(
-    c.dim(
-      `status ${snapshot.documentStatus}, ${plural(snapshot.runs, 'run')}, ${snapshot.vantage.browser}, finished ${snapshot.finishedAt}`,
-    ),
-  );
+  const statusLine = `status ${snapshot.documentStatus}, ${plural(snapshot.runs, 'run')}, ${snapshot.vantage.browser}, finished ${snapshot.finishedAt}`;
+  // A non-2xx main document means the inventory is of an error page, not of the
+  // page under test; it must not read as ordinary run metadata.
+  const ok = snapshot.documentStatus >= 200 && snapshot.documentStatus <= 299;
+  lines.push(ok ? c.dim(statusLine) : c.red(statusLine));
   lines.push(`snapshot: ${file}`);
   if (snapshot.blocked !== undefined) {
     lines.push(c.red(`blocked: ${snapshot.blocked.vendor} (${snapshot.blocked.evidence}); the inventory is unreliable`));

@@ -4,6 +4,8 @@
  * Walks observed scripts against manifest entries, then manifest entries
  * against observations (removed), then headers and frames. Severities come
  * from diff/policy.ts. Harness scripts are dropped and ignored ids skipped.
+ * A manifest with no script entry fails as `empty-manifest` before anything
+ * else is compared: it authorises nothing, so it can never be reported clean.
  *
  * When several manifest entries match one id the first in file order wins and
  * a note is added to `result.warnings`. Sibling `new` scripts in one build
@@ -44,12 +46,25 @@ import { severityFor, type PolicySeverity } from './policy.js';
 
 export type NormalizeUrlFn = (raw: string, cfg: IdentityConfig) => string;
 
+/**
+ * The invocation a printed hint command has to reproduce, so a pasted command
+ * acts on the profile and configuration this run used.
+ */
+export interface HintContext {
+  /** Profile of this run; `default` and undefined print no `--profile`. */
+  profile?: string | undefined;
+  /** `--config <path>` of this run; undefined prints no `--config`. */
+  config?: string | undefined;
+}
+
 /** Optional extras accepted on top of DiffOptions, mainly for tests. */
 export interface DiffExtras {
   /** URL normaliser used for spoof detection; defaults to identity/normalize. */
   normalizeUrl?: NormalizeUrlFn;
   /** Identity configuration passed to the normaliser. */
   identity?: IdentityConfig;
+  /** Flags the printed hint commands must carry; defaults to the snapshot's profile. */
+  hintContext?: HintContext;
 }
 
 /** Optional event fields; `undefined` values are dropped. */
@@ -128,9 +143,16 @@ export function bundlePath(id: string): { directory: string; extension: string; 
  * The suggested glob is built from the escaped directory, and is emitted only
  * when it is narrow enough for `approve --match` to accept and actually matches
  * every id in the group, so the printed command always runs. Its placeholders
- * are quoted, so the command survives a copy and paste into a shell.
+ * are quoted, so the command survives a copy and paste into a shell, and it
+ * carries the `--profile` and `--config` of this run so a paste cannot land on
+ * another profile's manifest.
  */
-export function bundleHints(events: readonly DiffEvent[]): string[] {
+export function bundleHints(events: readonly DiffEvent[], context: HintContext = {}): string[] {
+  const target = [
+    ...(context.profile !== undefined && context.profile !== '' && context.profile !== 'default' ? [`--profile "${context.profile}"`] : []),
+    ...(context.config !== undefined && context.config !== '' ? [`--config "${context.config}"`] : []),
+  ].join(' ');
+  const targetFlags = target === '' ? '' : ` ${target}`;
   const groups = new Map<string, BundleGroup>();
   for (const event of events) {
     if (event.type !== 'new') continue;
@@ -158,7 +180,7 @@ export function bundleHints(events: readonly DiffEvent[]): string[] {
     directories.add(group.directory);
     hints.push(
       `${group.stems.size} new scripts under ${group.directory}/ differ only in their file name, which is the content-hashed bundle pattern: every build renames them, so every deploy reports them as new. One entry can authorise that one directory, not its subdirectories, at the price of hashing none of their bodies:\n` +
-        `scriptlock approve --match "${glob}" --owner "<team>" --category framework --justification "<why this build directory is authorised>"`,
+        `scriptlock approve --match "${glob}"${targetFlags} --owner "<team>" --category framework --justification "<why this build directory is authorised>"`,
     );
   }
   return hints;
@@ -195,6 +217,18 @@ export function diff(options: DiffOptions & DiffExtras): DiffResult {
       severityFor(mode, 'blocked'),
       snapshot.finalUrl || snapshot.url,
       `bot-management challenge page detected (${snapshot.blocked.vendor}): ${snapshot.blocked.evidence}; the inventory is unreliable`,
+    );
+  }
+
+  // 1b. a manifest with no script entry is not an inventory. Without this an
+  // empty manifest (typically written from a snapshot of an error page) makes
+  // every later run report clean, gate included.
+  if (manifest.scripts.length === 0) {
+    push(
+      'empty-manifest',
+      severityFor(mode, 'empty-manifest'),
+      manifest.profile,
+      'the manifest holds no script entry, so nothing is authorised and no change can be detected; approve the inventory of a page that actually loaded',
     );
   }
 
@@ -432,6 +466,6 @@ export function diff(options: DiffOptions & DiffExtras): DiffResult {
     summary,
     exitCode,
     warnings,
-    hints: bundleHints(events),
+    hints: bundleHints(events, options.hintContext ?? { profile: snapshot.profile }),
   };
 }

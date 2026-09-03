@@ -4,40 +4,20 @@ Scriptlock is a lockfile for everything that executes in the browser. It opens a
 
 It is built for agencies, product teams and development teams that run a custom or embedded (iframe) checkout with a repository and CI, and that need three things from one tool: a script inventory with written justifications, change detection on a schedule, and a gate that blocks a deploy when the payment page picks up code nobody approved.
 
-> Status: version 1 is complete and tested, but `scriptlock` is not published to npm yet and there is no `v1` tag.
-> Until the first release, run it from a clone: `npm install && npm run build && node dist/cli.js --help`.
-> The npm and Action instructions below describe the released flow.
+> Status: 0.1.0, the first release. Every feature described here is implemented and covered by tests, and the
+> tool has been run against real storefronts, but it is new and has not yet been used in an assessment.
+> Expect the manifest format and the CLI to change before 1.0; breaking changes will be listed in the
+> [changelog](CHANGELOG.md).
 
-## Limits, read this first
+## Contents
 
-Scriptlock produces evidence artifacts of the kind that PCI SSC testing-procedure guidance lists: inventory records, written justifications, change-detection results and header baselines. It is not an attestation, it is not validated by PCI SSC or any QSA, and it does not determine whether your controls are sufficient. Whether the evidence is enough for your assessment is a decision for you and your assessor. Scriptlock helps you prepare; it does not decide.
-
-Synthetic scans are a sample, not a guarantee:
-
-- A skimmer can detect automation and stay dormant, serve different code by geography or session, or appear for a fraction of visitors. A scan that sees nothing is not proof that nothing is there.
-- There is a window between runs. A weekly run can miss code that was present for six days in between.
-- Scriptlock does not judge what a script does. It tells you that a script is new, changed, moved or spoofed; a human decides whether that is acceptable.
-- Runs can be blocked by bot management. Scriptlock detects challenge pages and fails the run as `blocked` rather than reporting a wrong inventory, but it ships no stealth patches. Allowlisting is your responsibility (see [Scanning behind bot management](#scanning-behind-bot-management)).
-
-Out of scope, cannot be scanned:
-
-- Shopify-hosted checkout. Shopify states that crawler signatures do not grant access to its checkout, and there is no merchant-side allowlist for a scanner.
-- Hosted redirect checkouts (Stripe Checkout, PayPal redirect and similar) where the customer leaves your origin. The payment page is not yours to scan, and the requirements discussed below do not apply to the redirecting page.
-- Dedicated and service worker bodies (version 1 records their entry URLs only), and any behaviour that only appears after a real card is submitted. Scriptlock never submits a card.
-
-## Which requirement applies to you
-
-PCI DSS v4.0.1 requirement 6.4.3 asks for an inventory of all payment page scripts with a written business or technical justification, an authorization method and an integrity method for each. Requirement 11.6.1 asks for a mechanism that detects and alerts on unauthorized changes to security-impacting HTTP headers and to script contents as received by the consumer browser, at least once every seven days or at a frequency set by a targeted risk analysis under 12.3.1. Both were best practice until 31 March 2025 and are mandatory after that date for merchants validating with SAQ A-EP, SAQ D or a Report on Compliance.
-
-| Your integration | What applies | Where Scriptlock fits |
-|---|---|---|
-| Redirect or fully outsourced. The customer is sent to a third-party payment page (HTTP 30x, meta refresh or JavaScript redirect). | 6.4.3 and 11.6.1 do not apply to the redirecting page (FAQ 1588; information supplement, March 2025). | Not needed for PCI. Still useful as a plain script lockfile for your own pages. |
-| SAQ A with an embedded payment form or iframe from a PCI DSS compliant third-party service provider (TPSP). | On 30 January 2025 PCI SSC removed 6.4.3, 11.6.1 and 12.3.1 from SAQ A and added an eligibility criterion: the merchant has confirmed that its site is not susceptible to script attacks that could affect its e-commerce systems. FAQ 1588 (February 2025) says the criterion applies only to merchants embedding a TPSP form or iframe and is met either by techniques such as those in 6.4.3 and 11.6.1, performed by the merchant or a third party, or by confirmation from the compliant TPSP that its solution, implemented per its instructions, protects the merchant's page. | The TPSP controls the inside of its iframe; it cannot see the page that embeds it. Scriptlock is a parent-page control: it inventories and diffs the scripts on your page that surround and create the iframe (supplement Table 3 assigns those to the merchant). |
-| SAQ A-EP, SAQ D or Report on Compliance. Your page handles or can affect cardholder data (direct post, JavaScript SDKs such as Accept.js, or you simply do not qualify for SAQ A). | 6.4.3 and 11.6.1 in full. FAQ 1331 (updated August 2026) requires that scoping these requirements out with SAQ eligibility criteria is explicitly reviewed and agreed with your compliance-accepting entity (acquirer or brand) before a ROC merchant relies on it. | The manifest is the 6.4.3 inventory with justification, authorization (a reviewed pull request) and integrity method per script. The scheduled `diff --drift` run and its history are 11.6.1 change-detection results. See [Evidence for assessors](#evidence-for-assessors) for what Scriptlock does and does not provide. |
-
-Sources by name: PCI DSS v4.0.1; the PCI SSC blog post of 30 January 2025 announcing the SAQ A changes; PCI SSC FAQ 1588 (February 2025); PCI SSC FAQ 1331 (updated August 2026); the PCI SSC Information Supplement "Payment Page Security and Preventing E-Skimming" (March 2025). SAQ type is determined by how your payment page is built, not by merchant size. When in doubt, ask your acquirer or assessor.
-
-The March 2025 information supplement is non-normative, but it describes the model Scriptlock implements. It defines an agentless monitoring model as a process or service, for example a headless browser, that regularly walks checkout flows and observes loaded scripts, headers and behaviours without adding scripts to real users' sessions; it lists that model's limitations (CAPTCHAs, logins, state-based flows, scheduled rather than constant checks); it names "automated or manual transaction simulations" among example mechanisms for 11.6.1; and it accepts email, SYSLOG and vendor logs as alerting methods. Its Table 3 makes the merchant responsible for scripts on the page that embeds a payment iframe and the TPSP responsible for scripts inside the iframe, which is exactly how Scriptlock assigns scope.
+- [Quick start](#quick-start) — install, first inventory, first gate
+- [Limits, read this first](#limits-read-this-first) — what a synthetic scan cannot tell you
+- [Which requirement applies to you](#which-requirement-applies-to-you) — PCI DSS 6.4.3 and 11.6.1 by integration type
+- [How it works](#how-it-works) — [collection](#collection), [identity](#identity), [content-hashed bundles](#content-hashed-bundles), [integrity policies](#integrity-policies), [scope](#scope), [gate versus drift](#gate-versus-drift)
+- [Manifest example](#manifest-example) and [configuration](#configuration) — including [flows](#flows) and [scanning behind bot management](#scanning-behind-bot-management)
+- [CLI reference](#cli-reference), the [library API](#library-api) and the [GitHub Action](#github-action)
+- [Evidence for assessors](#evidence-for-assessors), [comparison](#comparison), [scope and ethics](#scope-and-ethics), [roadmap](#roadmap)
 
 ## Quick start
 
@@ -65,6 +45,8 @@ npx scriptlock diff --gate
 
 Commit `scriptlock.config.yaml` and `scriptlock.lock.yaml`. From now on every change to the set of scripts on the page is a change to a file in your repository. When branch protection requires review, each such change lands through a reviewed pull request like any other change.
 
+Do not commit `.scriptlock/`. Everything under it is scan output, not evidence you maintain: the snapshot is a full inventory of every script URL on the page including query strings, the final URL and the complete `content-security-policy`, which is exactly the map of your payment page you would rather not publish in a repository. `scriptlock init` adds `.scriptlock/` to an existing `.gitignore` and prints the line to add when there is none. The manifest is the artifact you commit and review.
+
 Then add the weekly run. Copy [examples/workflows/scriptlock-weekly.yml](examples/workflows/scriptlock-weekly.yml) into `.github/workflows/` in your repository:
 
 ```yaml
@@ -76,7 +58,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: vladimirnizovtsev/scriptlock@v1
+      - uses: vladimirnizovtsev/scriptlock@v0.1.0
         with:
           mode: drift
           history: true
@@ -105,6 +87,41 @@ npx scriptlock approve --match "https://shop.example.com/_next/static/chunks/*.j
 
 `--replace` deletes the exact-id entries the glob now covers. Without it they stay in the manifest, and every later diff reports each of them as `removed`; the command prints them either way.
 
+If the first scan reports no scripts at all, the URL is wrong or the page did not load: `approve` refuses to create a manifest that authorises nothing, and a manifest with no entries fails every later `diff`, so a typo cannot produce a green gate.
+
+Before you rely on any of this for an assessment, read [Limits, read this first](#limits-read-this-first) and [Which requirement applies to you](#which-requirement-applies-to-you).
+
+## Limits, read this first
+
+Scriptlock produces evidence artifacts of the kind that PCI SSC testing-procedure guidance lists: inventory records, written justifications, change-detection results and header baselines. It is not an attestation, it is not validated by PCI SSC or any QSA, and it does not determine whether your controls are sufficient. Whether the evidence is enough for your assessment is a decision for you and your assessor. Scriptlock helps you prepare; it does not decide.
+
+Synthetic scans are a sample, not a guarantee:
+
+- A skimmer can detect automation and stay dormant, serve different code by geography or session, or appear for a fraction of visitors. A scan that sees nothing is not proof that nothing is there.
+- There is a window between runs. A weekly run can miss code that was present for six days in between.
+- Scriptlock does not judge what a script does. It tells you that a script is new, changed, moved or spoofed; a human decides whether that is acceptable.
+- Runs can be blocked by bot management. Scriptlock detects challenge pages and fails the run as `blocked` rather than reporting a wrong inventory, but it ships no stealth patches. Allowlisting is your responsibility (see [Scanning behind bot management](#scanning-behind-bot-management)).
+
+Out of scope, cannot be scanned:
+
+- Shopify-hosted checkout. Shopify states that crawler signatures do not grant access to its checkout, and there is no merchant-side allowlist for a scanner.
+- Hosted redirect checkouts (Stripe Checkout, PayPal redirect and similar) where the customer leaves your origin. The payment page is not yours to scan, and the requirements discussed below do not apply to the redirecting page.
+- Dedicated and service worker bodies (0.1.x records their entry URLs only), and any behaviour that only appears after a real card is submitted. Scriptlock never submits a card.
+
+## Which requirement applies to you
+
+PCI DSS v4.0.1 requirement 6.4.3 asks for an inventory of all payment page scripts with a written business or technical justification, an authorization method and an integrity method for each. Requirement 11.6.1 asks for a mechanism that detects and alerts on unauthorized changes to security-impacting HTTP headers and to script contents as received by the consumer browser, at least once every seven days or at a frequency set by a targeted risk analysis under 12.3.1. Both were best practice until 31 March 2025 and are mandatory after that date for merchants validating with SAQ A-EP, SAQ D or a Report on Compliance.
+
+| Your integration | What applies | Where Scriptlock fits |
+|---|---|---|
+| Redirect or fully outsourced. The customer is sent to a third-party payment page (HTTP 30x, meta refresh or JavaScript redirect). | 6.4.3 and 11.6.1 do not apply to the redirecting page (FAQ 1588; information supplement, March 2025). | Not needed for PCI. Still useful as a plain script lockfile for your own pages. |
+| SAQ A with an embedded payment form or iframe from a PCI DSS compliant third-party service provider (TPSP). | On 30 January 2025 PCI SSC removed 6.4.3, 11.6.1 and 12.3.1 from SAQ A and added an eligibility criterion: the merchant has confirmed that its site is not susceptible to script attacks that could affect its e-commerce systems. FAQ 1588 (February 2025) says the criterion applies only to merchants embedding a TPSP form or iframe and is met either by techniques such as those in 6.4.3 and 11.6.1, performed by the merchant or a third party, or by confirmation from the compliant TPSP that its solution, implemented per its instructions, protects the merchant's page. | The TPSP controls the inside of its iframe; it cannot see the page that embeds it. Scriptlock is a parent-page control: it inventories and diffs the scripts on your page that surround and create the iframe (supplement Table 3 assigns those to the merchant). |
+| SAQ A-EP, SAQ D or Report on Compliance. Your page handles or can affect cardholder data (direct post, JavaScript SDKs such as Accept.js, or you simply do not qualify for SAQ A). | 6.4.3 and 11.6.1 in full. FAQ 1331 (updated August 2026) requires that scoping these requirements out with SAQ eligibility criteria is explicitly reviewed and agreed with your compliance-accepting entity (acquirer or brand) before a ROC merchant relies on it. | The manifest is the 6.4.3 inventory with justification, authorization (a reviewed pull request) and integrity method per script. The scheduled `diff --drift` run and its history are 11.6.1 change-detection results. See [Evidence for assessors](#evidence-for-assessors) for what Scriptlock does and does not provide. |
+
+Sources by name: PCI DSS v4.0.1; the PCI SSC blog post of 30 January 2025 announcing the SAQ A changes; PCI SSC FAQ 1588 (February 2025); PCI SSC FAQ 1331 (updated August 2026); the PCI SSC Information Supplement "Payment Page Security and Preventing E-Skimming" (March 2025). SAQ type is determined by how your payment page is built, not by merchant size. When in doubt, ask your acquirer or assessor.
+
+The March 2025 information supplement is non-normative, but it describes the model Scriptlock implements. It defines an agentless monitoring model as a process or service, for example a headless browser, that regularly walks checkout flows and observes loaded scripts, headers and behaviours without adding scripts to real users' sessions; it lists that model's limitations (CAPTCHAs, logins, state-based flows, scheduled rather than constant checks); it names "automated or manual transaction simulations" among example mechanisms for 11.6.1; and it accepts email, SYSLOG and vendor logs as alerting methods. Its Table 3 makes the merchant responsible for scripts on the page that embeds a payment iframe and the TPSP responsible for scripts inside the iframe, which is exactly how Scriptlock assigns scope.
+
 ## How it works
 
 ### Collection
@@ -129,7 +146,7 @@ Manifest entries can also carry a `match` glob for content-hashed bundles.
 
 Identity is per file. Next.js, Vite, Nuxt, Astro and webpack builds put a content hash in the file name of every chunk, so a production build renames all of them: `chunks/1ixzeq6_vmaz2.js` becomes `chunks/9c1a4f0b8d2e.js` on the next deploy. Nothing about the page changed, but the diff sees every chunk as `new` and every entry as `removed`, in merchant scope, which fails the gate. If you approve them one by one, the same thing happens on the deploy after that, and the gate gets switched off within a week.
 
-The normaliser does not rescue this on its own. It collapses hash-like tokens (`app.3f9c2a1b.js` becomes `app.[hash].js`), but a whole file name that is itself a hash, with no stable stem next to it, has nothing left to keep. Collapsing those names would be worse than the noise: every chunk in the directory would share one identity, the manifest would hold one entry and all the others would disappear from the inventory.
+The normaliser does not rescue this on its own. It collapses hash-like tokens (`app.3f9c2a1b.js` becomes `app.[hash].js`), but a whole file name that is itself a hash, with no stable stem next to it, has nothing left to keep. Collapsing those names would be worse than the noise: every chunk in the directory would share one identity, the manifest would hold one entry and all the others would disappear from the inventory. So a stem that is nothing but a hash is kept verbatim. Where collapsing does apply and two files still land on one identity (`app.3f9c2a1b.js` and `app.7d2e1f0a.js` on the same page), the scan records a warning naming both raw URLs rather than dropping one silently.
 
 The fix is one entry for the build output directory:
 
@@ -199,7 +216,7 @@ An approved script observed in a different scope raises `scope-changed`.
 
 ### Gate versus drift
 
-`scriptlock diff --gate` is meant for deploy pipelines. An unapproved (`new`) script fails only in merchant scope and is informational in tpsp, threeds and embedded scope; `changed`, `moved`, `spoofed` and strict/structural header changes fail in any scope. `scriptlock diff --drift` is meant for the scheduled weekly run and is broader: new non-merchant scripts and removed frames become warnings. The matrix is data in the code and is shown by `scriptlock diff --help`.
+`scriptlock diff --gate` is meant for deploy pipelines. An unapproved (`new`) script fails only in merchant scope and is informational in tpsp, threeds and embedded scope; `changed`, `moved`, `spoofed` and, under the `strict` headers policy, header changes fail in any scope. `scriptlock diff --drift` is meant for the scheduled weekly run and is broader: new non-merchant scripts and removed frames become warnings. The matrix is data in the code and is shown by `scriptlock diff --help`.
 
 | Event | Condition | gate | drift |
 |---|---|---|---|
@@ -293,6 +310,7 @@ browser:
   timeoutMs: 30000
   extraHeaders:
     X-Scanner-Token: ${SCRIPTLOCK_SCANNER_TOKEN}
+  storageState: ./auth.json  # Playwright storage state, for a page behind a login
 identity:
   stripQuery: []             # query parameters removed before identity, in addition to built-in cache busters
   keepQuery: []              # query parameters kept even if they look like cache busters
@@ -312,9 +330,18 @@ profiles:
     settleMs: 3000           # idle time after the last step, to catch late tags
     runs: 1                  # runs unioned per scan
     history: false           # persist snapshots and diffs under .scriptlock/history/<profile>/
+  preview:
+    url: ${PREVIEW_URL}
+    manifest: scriptlock.lock.yaml   # several profiles can share one manifest, which is how a
+                                     # preview deployment is gated against the production
+                                     # inventory. Without it the manifest is
+                                     # scriptlock.lock.yaml for "default" and
+                                     # scriptlock.<profile>.lock.yaml for any other profile.
 ```
 
 `${VAR}` in any string value is replaced from the environment. A missing variable is a configuration error that names the variable, so every environment that loads the file must define every variable it references, including profiles that are not being scanned.
+
+Interpolation applies to `url` as well, and the URL is written verbatim to the snapshot, to every report and to the CI artifact. A `fill` step's value is redacted from output because it may be a secret; a URL is not. Keep tokens out of `url` — use `browser.extraHeaders` or `storageState` for authentication instead — or treat the snapshot as carrying that secret.
 
 ### Flows
 
@@ -362,22 +389,32 @@ scriptlock approve <id...> [--all-new] [--match <glob>] [--replace] --owner <s> 
 scriptlock report [--profile <name>] [--format md|json] [--snapshot <file>] [--out <file>]
 ```
 
-Global options: `--config <path>`, `--verbose`, `--no-color`. `scan` writes `.scriptlock/last.<profile>.json` unless `--out` is given. `diff` runs a scan unless `--snapshot` is given. `approve` reads the last snapshot unless `--snapshot` is given; `--approved-by` defaults to `git config user.name` or `$USER`, and `approvedAt` is today's UTC date. `approve --match <glob>` writes the single glob entry described in [Content-hashed bundles](#content-hashed-bundles), refuses a glob wider than one directory of one host, and lists every observed script it authorises with that script's scope; it writes one entry, so it cannot be combined with script ids, `--all-new` or `--refresh`. `--replace` (only with `--match`) removes the exact-id entries the glob makes redundant. Categories: `payment`, `functional`, `framework`, `tag-manager`, `analytics`, `marketing`, `advertising`, `consent`, `customer-success`, `security`, `ab-testing`, `cdn`, `other`.
+Global options: `--config <path>`, `--verbose`, `--no-color`. `scan` writes `.scriptlock/last.<profile>.json` unless `--out` is given. `diff` runs a scan unless `--snapshot` is given, and that scan replaces `.scriptlock/last.<profile>.json` so `approve` can act on what the diff just reported; a blocked scan is written to `.scriptlock/blocked.<profile>.json` instead, so a challenge page cannot destroy the last good snapshot. `approve` reads the last snapshot unless `--snapshot` is given; `--approved-by` defaults to `git config user.name` or `$USER`, and `approvedAt` is today's UTC date. `approve --match <glob>` writes the single glob entry described in [Content-hashed bundles](#content-hashed-bundles), refuses a glob wider than one directory of one host, and lists every observed script it authorises with that script's scope; it writes one entry, so it cannot be combined with script ids, `--all-new` or `--refresh`. `--replace` (only with `--match`) removes the exact-id entries the glob makes redundant. Categories: `payment`, `functional`, `framework`, `tag-manager`, `analytics`, `marketing`, `advertising`, `consent`, `customer-success`, `security`, `ab-testing`, `cdn`, `other`.
+
+Exit codes: 0 clean, 1 findings at fail severity (or no manifest yet), 2 run error — a blocked scan, a navigation failure, an invalid configuration, a missing browser, a usage error, or a Node older than 22. `scriptlock` with no command prints help and exits 2, so a dropped argument in CI is never mistaken for a finding.
+
+### Library API
+
+Scriptlock is a CLI. The package also has an importable entry point, but at 0.1.x only `scan`, `diff`, `readManifest`, `writeManifest`, the Zod schemas and the exported types are treated as public. Everything else `scriptlock` exports is an internal helper that may be renamed or removed in any release without a major version bump.
 
 ## GitHub Action
 
 The repository root contains a composite action. It installs Node and `scriptlock`, installs Chromium, runs `scriptlock diff`, writes the markdown report to the job summary, prints the text report to the log, uploads `.scriptlock/` as a run artifact and exits with Scriptlock's exit code.
 
+On a public repository a run artifact is downloadable by anyone, and the snapshot inside it names every script URL on the scanned page, the final URL and the full `content-security-policy`. Set `artifact: "false"` when the page must not be described publicly.
+
 ```yaml
-- uses: vladimirnizovtsev/scriptlock@v1
+- uses: vladimirnizovtsev/scriptlock@v0.1.0
   with:
     profile: default          # profile from scriptlock.config.yaml
     mode: gate                # gate | drift
     config: scriptlock.config.yaml
     node-version: "22"
-    version: latest           # scriptlock version to install
+    version: "0.1.0"          # scriptlock version to install; "latest" is the default
     history: "false"          # also write .scriptlock/history/<profile>/
     working-directory: .
+    artifact: "true"          # upload .scriptlock/ as a run artifact
+    retention-days: "90"      # clamped to the repository maximum, 90 on public repos
 ```
 
 Outputs: `exit-code` (0, 1 or 2) and `summary-file` (path to the markdown report). Two copy-paste workflows are in [examples/workflows](examples/workflows):
@@ -392,13 +429,13 @@ The action is also usable without GitHub: run the same commands in any CI that c
 What to show:
 
 - `scriptlock.lock.yaml` (or the per-profile manifests): the script inventory, with `justification`, `owner`, `category`, `integrity`, `integrityMethod`, `approvedBy` and `approvedAt` on every entry, plus the header baseline. When branch protection requires review, the git history of that file is the authorization trail: each entry lands through a reviewed pull request.
-- `.scriptlock/history/<profile>/` and the uploaded run artifacts: timestamped snapshots and diff results for every run, including the browser build and vantage point.
+- `.scriptlock/history/<profile>/` and the uploaded run artifacts: timestamped snapshots and diff results for every run, including the browser build and vantage point. Run artifacts are not a long-term evidence store: GitHub clamps artifact retention to the repository maximum, 90 days on public repositories and the Free plan, and only warns when a workflow asks for more. For a trail that outlives that, run with `history: true` and commit `.scriptlock/history/<profile>/` deliberately (it is otherwise gitignored), or copy the artifacts to your own storage.
 - The workflow file with its cron line: the monitored pages (profile URLs and flows) and the cadence.
 - `scriptlock report --format md`: the inventory grouped by scope, owner and category with authorization status (approved, unapproved, stale).
 
 What Scriptlock does not provide, and what you still need to document yourself:
 
-- Alert routing beyond CI. Version 1 alerts through the failing job: GitHub's failure email for scheduled workflows, the red check on a pull request, and the job summary. If your process needs a pager, a ticket or a Slack message, wire that up from the workflow.
+- Alert routing beyond CI. Scriptlock alerts through the failing job: GitHub's failure email for scheduled workflows, the red check on a pull request, and the job summary. If your process needs a pager, a ticket or a Slack message, wire that up from the workflow.
 - An incident response procedure (PCI DSS 12.10.5). Scriptlock raises the event; who responds, how and within what time is your procedure.
 - A targeted risk analysis (12.3.1) if you run less often than every seven days.
 - A judgement on sufficiency. See [Limits](#limits-read-this-first).
@@ -429,7 +466,7 @@ Only scan properties you own or have written permission to scan. Never point flo
 
 ## Roadmap
 
-Version 1 is the inventory, the manifest, the diff and the Action. Later, in rough order: worker script bodies (dedicated and service workers), a CSP draft derived from the manifest, SARIF output for code scanning, alert webhooks, and a history store beyond flat JSON files. No hosted service is planned.
+0.1.x is the inventory, the manifest, the diff and the Action. Later, in rough order: worker script bodies (dedicated and service workers), a CSP draft derived from the manifest, SARIF output for code scanning, alert webhooks, and a history store beyond flat JSON files. No hosted service is planned.
 
 ## License
 

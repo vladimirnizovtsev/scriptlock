@@ -77,7 +77,10 @@ profiles:
   # PREVIEW_URL is set by the workflow (see examples/workflows/scriptlock-deploy-gate.yml).
   preview:
     url: ${PREVIEW_URL}
-    steps: ./examples/checkout-flow.ts     # module escape hatch; .ts needs tsx installed
+    # Module escape hatch; .ts needs tsx installed. The path is resolved against the
+    # working directory, so copy examples/checkout-flow.ts next to this file (here:
+    # into scriptlock/) when you copy the configuration itself.
+    steps: ./scriptlock/checkout-flow.ts
     wait: load
     settleMs: 3000
     runs: 1

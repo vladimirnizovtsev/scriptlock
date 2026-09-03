@@ -119,6 +119,22 @@ export function makeSnapshot(overrides: Partial<Snapshot> = {}): Snapshot {
   return { ...base, ...overrides };
 }
 
+export const BASELINE_ID = 'https://baseline.example/baseline.js';
+export const BASELINE_IGNORE = 'https://baseline.example/*';
+
+/**
+ * The entry that keeps a factory manifest non-empty. A manifest with no script
+ * entry authorises nothing, so diff reports it as an `empty-manifest` fail; a
+ * test that does not care about manifest entries would otherwise carry that
+ * event. The entry is ignored, so it is never reported as `removed`, its
+ * hashes are unique so no observed script is ever mistaken for it having
+ * `moved`, and it changes no count (`approved` counts observations).
+ */
+export function baselineEntry(): ManifestScript {
+  return makeEntry({ id: BASELINE_ID, sha256: hex('bee'), structuralHash: hex('fad') });
+}
+
+/** Pass `scripts: []` to build the empty manifest the guard is meant to catch. */
 export function makeManifest(overrides: Partial<Manifest> = {}): Manifest {
   const base: Manifest = {
     version: 1,
@@ -126,8 +142,8 @@ export function makeManifest(overrides: Partial<Manifest> = {}): Manifest {
     url: MAIN_URL,
     headers: { policy: 'ignore', values: {} },
     frames: [],
-    scripts: [],
-    ignore: [],
+    scripts: [baselineEntry()],
+    ignore: [BASELINE_IGNORE],
   };
   return { ...base, ...overrides };
 }

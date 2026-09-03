@@ -27,8 +27,15 @@ function ofType(events: DiffEvent[], type: DiffEvent['type']): DiffEvent[] {
   return events.filter((e) => e.type === type);
 }
 
+// makeManifest() carries one ignored baseline entry so the empty-manifest guard
+// (tested on its own below) does not add an event to every case.
 function run(snapshotOverrides: Parameters<typeof makeSnapshot>[0], manifestOverrides: Parameters<typeof makeManifest>[0], mode: DiffMode) {
-  return diff({ snapshot: makeSnapshot(snapshotOverrides), manifest: makeManifest(manifestOverrides), mode, normalizeUrl: fakeNormalizeUrl });
+  return diff({
+    snapshot: makeSnapshot(snapshotOverrides),
+    manifest: makeManifest(manifestOverrides),
+    mode,
+    normalizeUrl: fakeNormalizeUrl,
+  });
 }
 
 describe('diff: clean run', () => {
@@ -60,6 +67,26 @@ describe('diff: blocked', () => {
     const result = run({ blocked: { vendor: 'akamai', evidence: 'x' }, scripts: [makeScript({ id: 'https://evil.example/x.js' })] }, {}, 'gate');
     expect(result.summary.fail).toBe(2);
     expect(result.exitCode).toBe(2);
+  });
+});
+
+describe('diff: empty manifest', () => {
+  it.each(MODES)('fails rather than reporting an empty manifest clean (%s)', (mode) => {
+    // The chain that produces this: a typo'd or temporarily down URL yields a
+    // snapshot with no scripts, `approve --all-new` writes a manifest with no
+    // entries, and every later diff would have nothing to compare.
+    const result = run({}, { scripts: [], ignore: [] }, mode);
+    const [event] = ofType(result.events, 'empty-manifest');
+    expect(event?.severity).toBe('fail');
+    expect(event?.subject).toBe('default');
+    expect(event?.message).toContain('no script entry');
+    expect(result.exitCode).toBe(1);
+  });
+
+  it('does not fire when the manifest holds an entry, even an unobserved one', () => {
+    const result = run({}, { scripts: [makeEntry({ id: 'https://shop.example.com/gone.js' })], ignore: [] }, 'gate');
+    expect(ofType(result.events, 'empty-manifest')).toEqual([]);
+    expect(ofType(result.events, 'removed')).toHaveLength(1);
   });
 });
 

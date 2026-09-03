@@ -4,6 +4,13 @@
  * as a library. The CLI entry point (src/cli.ts) is deliberately not exported
  * because it runs on import.
  *
+ * Supported surface at 0.1.x: `scan`, `diff`, `readManifest`, `writeManifest`,
+ * the Zod schemas and the exported types. Everything else re-exported here is
+ * an internal helper, exposed because the CLI and the tests share it; it may be
+ * renamed or removed in any release. The README says the same, so that this is
+ * not a semver promise made by accident. Narrowing the surface deliberately is
+ * a 0.2 change, not a patch.
+ *
  * Limitations: the command functions (runScan and friends) print through the
  * CommandContext they receive and resolve paths against its cwd; flow modules
  * are still resolved by the collector against process.cwd().

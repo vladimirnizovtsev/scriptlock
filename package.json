@@ -1,6 +1,6 @@
 {
   "name": "scriptlock",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Client-side script inventory and change detection for web pages. A lockfile for everything that executes in the browser.",
   "keywords": [
     "script-inventory",
@@ -38,12 +38,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    }
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
     "action.yml",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE",
     "NOTICE"
   ],

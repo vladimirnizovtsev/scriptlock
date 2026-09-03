@@ -4,11 +4,14 @@
  * validated with the configuration schema before it is written, so `init`
  * never produces a file that `loadConfig` would reject.
  *
+ * Also adds `.scriptlock/` to an existing .gitignore (scan output is not a
+ * committed artifact) and prints the rule when there is no .gitignore.
+ *
  * Limitations: refuses to overwrite an existing scriptlock.config.yaml or .yml
  * unless `force` is set; the profile URL is the only value taken from the
- * command line.
+ * command line; a missing .gitignore is never created.
  */
-import { access, writeFile } from 'node:fs/promises';
+import { access, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { CONFIG_FILE_NAMES, parseConfig } from '../config/load.js';
 import { DEFAULT_PROFILE_URL, DEFAULT_SETTLE_MS, DEFAULT_TIMEOUT_MS, DEFAULT_VIEWPORT } from '../config/schema.js';
@@ -26,7 +29,18 @@ export interface InitCommandResult {
   /** Absolute path of the written configuration. */
   path: string;
   content: string;
+  /**
+   * What happened to `.gitignore`: `appended` when the ignore rule was added to
+   * an existing file, `present` when it was already covered, `missing` when
+   * there is no `.gitignore` (the rule is printed instead of a file created).
+   */
+  gitignore: GitignoreOutcome;
 }
+
+export type GitignoreOutcome = 'appended' | 'present' | 'missing';
+
+/** The rule that keeps scan output (snapshots, reports, history) out of the repository. */
+export const IGNORE_LINE = '.scriptlock/';
 
 /** The annotated configuration written by `scriptlock init`. */
 export function configTemplate(url: string = DEFAULT_PROFILE_URL): string {
@@ -103,6 +117,31 @@ async function exists(file: string): Promise<boolean> {
   }
 }
 
+/**
+ * Adds `.scriptlock/` to an existing `.gitignore`. The snapshot is a complete
+ * inventory of every script URL on the scanned page, so `git add -A` after a
+ * scan would publish it; only the manifest belongs in the repository. A
+ * missing `.gitignore` is left alone (creating one is the repository owner's
+ * decision) and reported to the caller so the rule can be printed instead.
+ */
+async function ensureGitignore(cwd: string): Promise<GitignoreOutcome> {
+  const file = path.join(cwd, '.gitignore');
+  let current: string;
+  try {
+    current = await readFile(file, 'utf8');
+  } catch {
+    return 'missing';
+  }
+  const covered = current
+    .split('\n')
+    .map((line) => line.trim())
+    .some((line) => line === IGNORE_LINE || line === '.scriptlock' || line === '/.scriptlock' || line === '/.scriptlock/');
+  if (covered) return 'present';
+  const separator = current === '' || current.endsWith('\n') ? '' : '\n';
+  await writeFile(file, `${current}${separator}\n# Scriptlock scan output (snapshots, reports, history). Commit the manifest, not this.\n${IGNORE_LINE}\n`, 'utf8');
+  return 'appended';
+}
+
 export async function runInit(ctx: CommandContext, opts: InitCommandOptions = {}): Promise<InitCommandResult> {
   const target = path.join(ctx.cwd, 'scriptlock.config.yaml');
   if (opts.force !== true) {
@@ -120,15 +159,30 @@ export async function runInit(ctx: CommandContext, opts: InitCommandOptions = {}
   // Validate the template with the real schema so a bad URL is reported before anything is written.
   parseConfig(content, { path: target, env: {} });
   await writeFile(target, content, 'utf8');
-  ctx.out(
-    [
-      `wrote ${target}`,
-      'Next steps:',
-      '  1. Edit the profile URL (and steps) in scriptlock.config.yaml.',
-      '  2. scriptlock scan                 record every script and header of the page',
-      '  3. scriptlock approve --all-new --owner "<team>" --category "<category>" --justification "<why these scripts belong on the page>"',
-      '  4. scriptlock diff --gate          compare a fresh scan with the manifest; exit 0 clean, 1 findings, 2 run error',
-    ].join('\n'),
-  );
-  return { path: target, content };
+
+  const gitignore = await ensureGitignore(ctx.cwd);
+  const lines = [`wrote ${target}`];
+  if (gitignore === 'appended') lines.push(`added ${IGNORE_LINE} to .gitignore (scan output is not a committed artifact)`);
+  lines.push('Next steps:');
+  const steps: string[][] = [];
+  // Nothing to edit when the URL came from --url.
+  if (opts.url === undefined) steps.push(['Edit the profile URL (and steps) in scriptlock.config.yaml.']);
+  if (gitignore === 'missing') {
+    steps.push([`Add ${IGNORE_LINE} to your .gitignore: what lands there is scan output, not evidence to commit.`]);
+  }
+  steps.push(['scriptlock scan                 record every script and header of the page']);
+  // A concrete owner and justification: the placeholder guard refuses "<team>"
+  // and "<why ...>", so a printed command has to be one that actually runs.
+  steps.push([
+    'scriptlock approve --all-new --owner web --category functional --justification "Initial inventory of the checkout page, reviewed in PR #123"',
+    'replace the owner, category and justification with your own: they are the 6.4.3 record',
+  ]);
+  steps.push(['scriptlock diff --gate          compare a fresh scan with the manifest; exit 0 clean, 1 findings, 2 run error']);
+  steps.forEach(([step, note], index) => {
+    lines.push(`  ${index + 1}. ${step ?? ''}`);
+    if (note !== undefined) lines.push(`     ${note}`);
+  });
+  lines.push('Commit scriptlock.config.yaml and the manifest (scriptlock.lock.yaml); keep .scriptlock/ out of the repository.');
+  ctx.out(lines.join('\n'));
+  return { path: target, content, gitignore };
 }

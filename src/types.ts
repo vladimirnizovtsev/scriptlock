@@ -360,7 +360,8 @@ export type DiffEventType =
   | 'header-removed'
   | 'new-frame' // cross-origin iframe with no manifest entry
   | 'removed-frame'
-  | 'blocked'; // challenge page detected, inventory unreliable
+  | 'blocked' // challenge page detected, inventory unreliable
+  | 'empty-manifest'; // the manifest holds no script entry, so it is not an inventory
 
 export type Severity = 'fail' | 'warn' | 'info';
 

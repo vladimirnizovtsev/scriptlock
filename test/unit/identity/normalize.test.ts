@@ -74,12 +74,26 @@ describe('normalizeUrl: path hash collapsing (rule 3)', () => {
     );
   });
 
-  it('collapses a whole hash-only path segment and a mixed base62 token of 16+ chars', () => {
+  it('collapses a whole hash-only directory segment: the file name keeps the path distinguishable', () => {
     expect(normalizeUrl('https://cdn.example.com/0123456789abcdef/bundle.js', cfg)).toBe(
       'https://cdn.example.com/[hash]/bundle.js',
     );
-    expect(normalizeUrl('https://cdn.example.com/build/aZ3kL9mQ2xP7vR4tW1yB.js', cfg)).toBe(
-      'https://cdn.example.com/build/[hash].js',
+    expect(normalizeUrl('https://cdn.example.com/aZ3kL9mQ2xP7vR4tW1yB/bundle.js', cfg)).toBe(
+      'https://cdn.example.com/[hash]/bundle.js',
+    );
+  });
+
+  it('keeps a file name whose whole stem is a hash, so sibling chunks stay distinct', () => {
+    // Collapsing these would give every chunk in the directory one identity:
+    // the manifest would hold a single entry and the rest of the executed
+    // scripts would silently vanish from the inventory (DESIGN.md 4.1).
+    for (const file of ['9c1a4f0b8d2e', 'aa22bb33cc44', 'aZ3kL9mQ2xP7vR4tW1yB', '0123456789abcdef']) {
+      const url = `https://cdn.example.com/build/${file}.js`;
+      expect(normalizeUrl(url, cfg)).toBe(url);
+    }
+    // A stable token next to the hash still collapses: nothing is lost.
+    expect(normalizeUrl('https://cdn.example.com/build/app.9c1a4f0b8d2e.js', cfg)).toBe(
+      'https://cdn.example.com/build/app.[hash].js',
     );
   });
 

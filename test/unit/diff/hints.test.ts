@@ -4,7 +4,7 @@ import { globMatches, isNarrowGlob } from '../../../src/manifest/match.js';
 import type { DiffEvent, ObservedScript } from '../../../src/types.js';
 import { fakeNormalizeUrl, hex, makeEntry, makeManifest, makeScript, makeSnapshot } from './helpers.js';
 
-const CHUNKS = 'https://nzv.dev/_next/static/chunks';
+const CHUNKS = 'https://shop.example.com/_next/static/chunks';
 
 function chunk(stem: string, seed: string, extension: string = 'js') {
   const id = `${CHUNKS}/${stem}.${extension}`;
@@ -28,15 +28,15 @@ function newEvent(subject: string): DiffEvent {
 describe('bundlePath', () => {
   it('splits an http(s) id into directory, extension and stem', () => {
     expect(bundlePath(`${CHUNKS}/1ixzeq6_vmaz2.js`)).toEqual({ directory: CHUNKS, extension: 'js', stem: '1ixzeq6_vmaz2' });
-    expect(bundlePath('https://nzv.dev/app.mjs')).toEqual({ directory: 'https://nzv.dev', extension: 'mjs', stem: 'app' });
+    expect(bundlePath('https://shop.example.com/app.mjs')).toEqual({ directory: 'https://shop.example.com', extension: 'mjs', stem: 'app' });
   });
 
   it('returns undefined for ids that cannot be a bundle chunk', () => {
-    expect(bundlePath('inline:https://nzv.dev:9f2c41ba0d77e1a3')).toBeUndefined();
-    expect(bundlePath('eval:https://nzv.dev:9f2c41ba0d77e1a3')).toBeUndefined();
-    expect(bundlePath('blob:https://nzv.dev')).toBeUndefined();
-    expect(bundlePath('https://nzv.dev/vendor.js?id=GTM-ABC')).toBeUndefined();
-    expect(bundlePath('https://nzv.dev/chunks/noextension')).toBeUndefined();
+    expect(bundlePath('inline:https://shop.example.com:9f2c41ba0d77e1a3')).toBeUndefined();
+    expect(bundlePath('eval:https://shop.example.com:9f2c41ba0d77e1a3')).toBeUndefined();
+    expect(bundlePath('blob:https://shop.example.com')).toBeUndefined();
+    expect(bundlePath('https://shop.example.com/vendor.js?id=GTM-ABC')).toBeUndefined();
+    expect(bundlePath('https://shop.example.com/chunks/noextension')).toBeUndefined();
     expect(bundlePath('not a url')).toBeUndefined();
   });
 });
@@ -46,7 +46,7 @@ describe('diff hints: content-hashed bundles', () => {
     const hints = hintsFor([chunk('1ixzeq6_vmaz2', '1'), chunk('2hh4ipina8zdg', '2'), chunk('turbopack-1l_s3wnkx96or', '3')]);
     expect(hints).toHaveLength(1);
     const hint = hints[0] ?? '';
-    expect(hint).toContain('3 new scripts under https://nzv.dev/_next/static/chunks/');
+    expect(hint).toContain('3 new scripts under https://shop.example.com/_next/static/chunks/');
     expect(hint).toContain('content-hashed bundle pattern');
     expect(hint.split('\n')[1]).toBe(
       `scriptlock approve --match "${CHUNKS}/*.js" --owner "<team>" --category framework --justification "<why this build directory is authorised>"`,
@@ -67,29 +67,29 @@ describe('diff hints: content-hashed bundles', () => {
     // Scripts at the root of the host would need a glob covering the whole
     // origin, which approveMatch refuses, so no command is printed.
     const root = ['one', 'two', 'three'].map((stem, index) => {
-      const id = `https://nzv.dev/${stem}.js`;
+      const id = `https://shop.example.com/${stem}.js`;
       return makeScript({ id, url: id, rawUrl: id, sha256: hex(String(index + 1)) });
     });
     expect(hintsFor(root)).toEqual([]);
   });
 
   it('escapes glob metacharacters in the directory so the printed glob matches the chunks', () => {
-    const directory = 'https://nzv.dev/build(2)/chunks';
+    const directory = 'https://shop.example.com/build(2)/chunks';
     const ids = ['1ixzeq6_vmaz2', '2hh4ipina8zdg', 'turbopack-1l_s3wnkx96or'].map((stem) => `${directory}/${stem}.js`);
     const hints = bundleHints(ids.map(newEvent));
     expect(hints).toHaveLength(1);
     const glob = /--match "([^"]+)"/.exec(hints[0] ?? '')?.[1] ?? '';
-    expect(glob).toBe('https://nzv.dev/build\\(2\\)/chunks/*.js');
+    expect(glob).toBe('https://shop.example.com/build\\(2\\)/chunks/*.js');
     for (const id of ids) expect(globMatches(glob, id)).toBe(true);
     expect(isNarrowGlob(glob)).toBe(true);
   });
 
   it('does not fire for unrelated ids', () => {
     const unrelated = [
-      makeScript({ id: 'https://nzv.dev/vendor.js?id=GTM-ABC', url: 'https://nzv.dev/vendor.js?id=GTM-ABC', sha256: hex('1') }),
-      makeScript({ id: 'inline:https://nzv.dev:0011223344556677', kind: 'inline', url: undefined, rawUrl: undefined, sha256: hex('2') }),
-      makeScript({ id: 'https://nzv.dev/a/one.js', url: 'https://nzv.dev/a/one.js', sha256: hex('3') }),
-      makeScript({ id: 'https://nzv.dev/b/two.js', url: 'https://nzv.dev/b/two.js', sha256: hex('4') }),
+      makeScript({ id: 'https://shop.example.com/vendor.js?id=GTM-ABC', url: 'https://shop.example.com/vendor.js?id=GTM-ABC', sha256: hex('1') }),
+      makeScript({ id: 'inline:https://shop.example.com:0011223344556677', kind: 'inline', url: undefined, rawUrl: undefined, sha256: hex('2') }),
+      makeScript({ id: 'https://shop.example.com/a/one.js', url: 'https://shop.example.com/a/one.js', sha256: hex('3') }),
+      makeScript({ id: 'https://shop.example.com/b/two.js', url: 'https://shop.example.com/b/two.js', sha256: hex('4') }),
       makeScript({ id: 'https://other.example/c/three.js', url: 'https://other.example/c/three.js', sha256: hex('5') }),
     ];
     expect(hintsFor(unrelated)).toEqual([]);
@@ -99,7 +99,7 @@ describe('diff hints: content-hashed bundles', () => {
     const scripts: ObservedScript[] = [];
     for (const dir of ['a', 'b', 'c', 'd', 'e']) {
       for (const stem of ['one', 'two', 'three']) {
-        const id = `https://nzv.dev/${dir}/${stem}.js`;
+        const id = `https://shop.example.com/${dir}/${stem}.js`;
         scripts.push(makeScript({ id, url: id, rawUrl: id, sha256: hex(dir) }));
       }
     }

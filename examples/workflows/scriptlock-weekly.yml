@@ -35,11 +35,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Pin to a release tag or, better, a full commit SHA for supply chain hygiene.
+      # Pin both the action ref and the npm version: a release tag or, better, a full
+      # commit SHA for the action, and an exact version for the tool that produces the
+      # evidence. "latest" would silently change what ran between two weekly reports.
       - name: Scriptlock
-        uses: vladimirnizovtsev/scriptlock@v1
+        uses: vladimirnizovtsev/scriptlock@v0.1.0
         with:
           profile: ${{ matrix.profile }}
           mode: drift
           history: "true"
-          version: latest
+          version: "0.1.0"

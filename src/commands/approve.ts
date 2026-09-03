@@ -157,6 +157,26 @@ function describeEntry(entry: ManifestScript): string {
   return `${entry.id} (${entry.kind}, ${entry.scope}, ${entry.integrity}/${entry.integrityMethod})`;
 }
 
+/**
+ * Refuses to create a manifest out of nothing. A snapshot with no script and
+ * no security header is what a typo'd URL, an error page or a page that never
+ * loaded produces; approving it writes an empty inventory that every later
+ * `diff` would have to call clean.
+ */
+function assertWorthApproving(snapshot: Snapshot, snapshotPath: string): void {
+  const scripts = snapshot.scripts.filter((script) => script.scope !== 'harness').length;
+  if (scripts > 0 || Object.keys(snapshot.headers).length > 0) return;
+  const status = snapshot.documentStatus === 0 ? 'no response' : `HTTP ${snapshot.documentStatus}`;
+  throw new ScriptlockError(
+    'UNSUPPORTED',
+    `snapshot ${snapshotPath} recorded no scripts and no security headers (${snapshot.url}, ${status}); refusing to create a manifest that authorises nothing`,
+    {
+      exitCode: 2,
+      hint: 'Check the profile URL in scriptlock.config.yaml, open it in a browser, then run "scriptlock scan" again',
+    },
+  );
+}
+
 export async function runApprove(ctx: CommandContext, opts: ApproveCommandOptions): Promise<ApproveCommandResult> {
   const ids = [...(opts.ids ?? [])];
   const allNew = opts.allNew === true;
@@ -207,6 +227,7 @@ export async function runApprove(ctx: CommandContext, opts: ApproveCommandOption
     manifest = await readManifest(manifestPath);
   } catch (error) {
     if (!isScriptlockError(error) || error.code !== 'MANIFEST_NOT_FOUND') throw error;
+    assertWorthApproving(snapshot, snapshotPath);
     manifest = emptyManifest(opts.profile, loaded.profile.url);
     manifest.headers.values = { ...snapshot.headers };
     created = true;

@@ -21,6 +21,7 @@ export const DIFF_MODES: readonly DiffMode[] = ['gate', 'drift'];
 
 export const DIFF_EVENT_TYPES: readonly DiffEventType[] = [
   'blocked',
+  'empty-manifest',
   'new',
   'removed',
   'changed',
@@ -52,6 +53,7 @@ function both(severity: PolicySeverity): ScopeTable {
 export const SEVERITY: Record<DiffMode, Record<DiffEventType, ScopeTable>> = {
   gate: {
     blocked: both('fail'),
+    'empty-manifest': both('fail'),
     new: { merchant: 'fail', other: 'info' },
     removed: both('warn'),
     changed: both('fail'),
@@ -66,6 +68,7 @@ export const SEVERITY: Record<DiffMode, Record<DiffEventType, ScopeTable>> = {
   },
   drift: {
     blocked: both('fail'),
+    'empty-manifest': both('fail'),
     new: { merchant: 'fail', other: 'warn' },
     removed: both('warn'),
     changed: both('fail'),
@@ -146,6 +149,7 @@ interface RowSpec {
 
 const ROW_SPECS: readonly RowSpec[] = [
   { type: 'blocked', condition: 'challenge page detected (exit code 2)' },
+  { type: 'empty-manifest', condition: 'manifest holds no script entry' },
   { type: 'new', condition: 'no entry, scope merchant', scope: 'merchant' },
   { type: 'new', condition: 'no entry, scope tpsp / threeds / embedded', scope: 'tpsp' },
   { type: 'removed', condition: 'entry not observed in any run' },
