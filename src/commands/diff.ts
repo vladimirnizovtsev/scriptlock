@@ -82,7 +82,7 @@ export function missingManifestInstructions(profile: string, manifestPath: strin
   return [
     `error: no manifest found for profile "${profile}" (expected ${manifestPath})`,
     `The snapshot with ${plural(scripts, 'script')} is at ${snapshotPath}. Review it, then create the manifest from it:`,
-    `  scriptlock approve --all-new --profile ${profile} --owner <team> --category <category> --justification "<why these scripts belong on the page>"`,
+    `  scriptlock approve --all-new --profile ${profile} --owner "<team>" --category "<category>" --justification "<why these scripts belong on the page>"`,
     'Commit the manifest next to scriptlock.config.yaml and run "scriptlock diff" again.',
   ].join('\n');
 }

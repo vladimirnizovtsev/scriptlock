@@ -44,6 +44,12 @@ const headerPolicySchema = z.enum(['strict', 'track', 'ignore']);
 const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected an ISO date (YYYY-MM-DD)');
 const hashSchema = z.string().min(1);
 
+const coveredAtApprovalSchema = z.strictObject({
+  count: z.int().nonnegative(),
+  scannedAt: z.string().min(1),
+  ids: z.array(z.string().min(1)).default([]),
+});
+
 const scriptSchema = z
   .strictObject({
     id: z.string().min(1),
@@ -59,6 +65,7 @@ const scriptSchema = z
     justification: z.string().min(1),
     approvedBy: z.string().min(1),
     approvedAt: isoDateSchema,
+    coveredAtApproval: coveredAtApprovalSchema.optional(),
     notes: z.string().optional(),
     lastSeenSha256: hashSchema.optional(),
   })
@@ -135,6 +142,9 @@ function toScript(s: ManifestSchemaOutput['scripts'][number]): ManifestScript {
     justification: s.justification,
     approvedBy: s.approvedBy,
     approvedAt: s.approvedAt,
+    ...(s.coveredAtApproval !== undefined
+      ? { coveredAtApproval: { count: s.coveredAtApproval.count, scannedAt: s.coveredAtApproval.scannedAt, ids: [...s.coveredAtApproval.ids] } }
+      : {}),
     ...(s.notes !== undefined ? { notes: s.notes } : {}),
     ...(s.lastSeenSha256 !== undefined ? { lastSeenSha256: s.lastSeenSha256 } : {}),
   };

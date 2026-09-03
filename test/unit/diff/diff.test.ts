@@ -118,6 +118,17 @@ describe('diff: removed', () => {
     expect(ofType(result.events, 'new')).toEqual([]);
     expect(result.summary.approved).toBe(1);
   });
+
+  it('a glob entry shadowed by exact entries for every id it covers is still observed', () => {
+    const id = 'https://shop.example.com/assets/chunk.abc.js';
+    const glob = makeEntry({ id: 'https://shop.example.com/assets/*.js', match: 'https://shop.example.com/assets/*.js', integrity: 'track', integrityMethod: 'source-tracked', sha256: undefined, structuralHash: undefined });
+    const exact = makeEntry({ id, sha256: APP_SHA });
+    const result = run({ scripts: [makeScript({ id, sha256: APP_SHA })] }, { scripts: [exact, glob] }, 'gate');
+    expect(ofType(result.events, 'removed')).toEqual([]);
+    expect(result.events).toEqual([]);
+    // The exact entry is the one that is enforced; the glob is only shadowed.
+    expect(result.summary.approved).toBe(1);
+  });
 });
 
 describe('diff: changed', () => {

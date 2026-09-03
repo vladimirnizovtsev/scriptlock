@@ -66,3 +66,31 @@ describe('renderText', () => {
     expect(renderText(sample(), { color: true })).toMatch(ANSI);
   });
 });
+
+describe('renderText: hints', () => {
+  const CHUNKS = 'https://shop.example.com/_next/static/chunks';
+  const COMMAND = `scriptlock approve --match "${CHUNKS}/*.js" --owner "<team>" --category framework --justification "<why this build directory is authorised>"`;
+
+  function bundleResult() {
+    const scripts = ['1ixzeq6_vmaz2', '2hh4ipina8zdg', 'turbopack-1l_s3wnkx96or'].map((stem, index) => {
+      const id = `${CHUNKS}/${stem}.js`;
+      return makeScript({ id, url: id, rawUrl: id, sha256: hex(String(index + 1)) });
+    });
+    return diff({ snapshot: makeSnapshot({ scripts }), manifest: makeManifest(), mode: 'gate', normalizeUrl: fakeNormalizeUrl });
+  }
+
+  it('prints the approve --match suggestion between the events and the summary', () => {
+    const text = renderText(bundleResult(), { color: false });
+    expect(text).toContain('HINTS (1)');
+    expect(text).toContain(`3 new scripts under ${CHUNKS}/ differ only in their file name`);
+    expect(text).toContain(`    ${COMMAND}`);
+    expect(text.indexOf('FAIL')).toBeLessThan(text.indexOf('HINTS'));
+    expect(text.indexOf('HINTS')).toBeLessThan(text.indexOf('summary:'));
+    expect(text).not.toMatch(ANSI);
+    expect(text).not.toMatch(/—/);
+  });
+
+  it('prints no hint section when there is nothing to suggest', () => {
+    expect(renderText(sample(), { color: false })).not.toContain('HINTS');
+  });
+});

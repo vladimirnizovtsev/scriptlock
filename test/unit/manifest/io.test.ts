@@ -45,6 +45,16 @@ function sample(): Manifest {
       script({ id: 'inline:https://shop.example.com:9f2c41ba0d77e1a3', kind: 'inline', integrity: 'structural', structuralHash: 'b'.repeat(64), category: 'framework', justification: 'Hydration state: literals change per request', notes: 'true' }),
       script({ id: 'https://js.stripe.com/v3/inner.js', scope: 'tpsp', integrity: 'track', integrityMethod: 'vendor-attested', category: 'payment', lastSeenSha256: 'c'.repeat(64) }),
       script({ id: 'https://shop.example.com/assets/app.[hash].js', match: 'https://shop.example.com/assets/app-*.js' }),
+      script({
+        id: 'https://shop.example.com/_next/static/chunks/*.js',
+        match: 'https://shop.example.com/_next/static/chunks/*.js',
+        integrity: 'track',
+        integrityMethod: 'source-tracked',
+        sha256: undefined,
+        category: 'framework',
+        justification: 'Next.js build output',
+        coveredAtApproval: { count: 12, scannedAt: '2026-09-02T10:00:05.000Z', ids: ['https://shop.example.com/_next/static/chunks/1ixzeq6_vmaz2.js'] },
+      }),
       script({ id: 'https://js.stripe.com/v3', integrity: 'track', integrityMethod: 'source-tracked', category: 'payment', justification: 'Stripe.js loader; evergreen' }),
       script({ id: 'https://cdn.example.net/vendor.js?id=GTM-ABC', integrity: 'url-only', integrityMethod: 'none', category: 'tag-manager', justification: '2026-09-02' }),
       script({ id: 'eval:https://widget.example.net:0011223344556677', kind: 'eval', scope: 'embedded', integrity: 'structural', structuralHash: 'd'.repeat(64), category: 'other', justification: 'Widget eval' }),
@@ -78,6 +88,7 @@ describe('serialiseManifest', () => {
     expect(ids).toEqual([
       'https://cdn.example.net/vendor.js?id=GTM-ABC',
       'https://js.stripe.com/v3',
+      'https://shop.example.com/_next/static/chunks/*.js',
       'https://shop.example.com/assets/app.[hash].js',
       'inline:https://shop.example.com:9f2c41ba0d77e1a3',
       'https://js.stripe.com/v3/inner.js',
@@ -133,6 +144,11 @@ describe('round trip', () => {
     const read = await readManifest(file);
     expect(read).toEqual(sortManifest(manifest));
     expect(read.scripts.find((s) => s.id.startsWith('inline:'))?.notes).toBe('true');
+    expect(read.scripts.find((s) => s.id.endsWith('/chunks/*.js'))?.coveredAtApproval).toEqual({
+      count: 12,
+      scannedAt: '2026-09-02T10:00:05.000Z',
+      ids: ['https://shop.example.com/_next/static/chunks/1ixzeq6_vmaz2.js'],
+    });
     expect(read.scripts.find((s) => s.id.includes('vendor.js'))?.justification).toBe('2026-09-02');
     const first = await readFile(file, 'utf8');
     await writeManifest(file, read);

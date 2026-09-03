@@ -47,22 +47,41 @@ export {
 // manifest
 export { readManifest, writeManifest, parseManifest, serialiseManifest, sortManifest, emptyManifest } from './manifest/io.js';
 export { manifestSchema, formatManifestIssues, toManifest } from './manifest/schema.js';
-export { findScriptEntry, findScriptEntryById, findFrameEntry, isIgnored, matchingScriptEntries } from './manifest/match.js';
+export {
+  findScriptEntry,
+  findScriptEntryById,
+  findFrameEntry,
+  coveringScriptEntries,
+  escapeGlob,
+  globMatches,
+  globNarrowness,
+  isIgnored,
+  isNarrowGlob,
+  matchingScriptEntries,
+  type GlobProblem,
+} from './manifest/match.js';
 export {
   approveScripts,
+  approveMatch,
   approveFrames,
+  redundantScriptEntries,
   refreshTracked,
   refreshScripts,
+  scriptsMatchingGlob,
   defaultIntegrityFor,
   defaultIntegrityMethod,
+  isPlaceholder,
   ALL_NEW,
+  COVERAGE_EVIDENCE_LIMIT,
+  GLOB_INTEGRITY,
+  type ApproveMatchOptions,
   type ApproveMeta,
   type ApproveFrameMeta,
   type ApproveHelpers,
 } from './manifest/approve.js';
 
 // diff
-export { diff, type DiffExtras, type NormalizeUrlFn } from './diff/diff.js';
+export { diff, bundleHints, bundlePath, BUNDLE_HINT_THRESHOLD, MAX_HINTS, type DiffExtras, type NormalizeUrlFn } from './diff/diff.js';
 export {
   severityFor,
   policyRows,

@@ -94,6 +94,17 @@ npx scriptlock approve --refresh "https://js.stripe.com/v3"
 npx scriptlock report --format md --out inventory.md
 ```
 
+If your build renames every chunk on every deploy, authorise the build output directory with one entry instead of approving the chunks one by one. Read the tradeoff first: [Content-hashed bundles](#content-hashed-bundles).
+
+```sh
+npx scriptlock approve --match "https://shop.example.com/_next/static/chunks/*.js" \
+  --replace \
+  --owner web --category framework \
+  --justification "Next.js build output, built from this repository by CI"
+```
+
+`--replace` deletes the exact-id entries the glob now covers. Without it they stay in the manifest, and every later diff reports each of them as `removed`; the command prints them either way.
+
 ## How it works
 
 ### Collection
@@ -113,6 +124,54 @@ Identity answers "is this the same script as before" independently of body chang
 - The structural hash masks string literals, numbers, regular expressions, comments and whitespace before hashing. Framework hydration blocks whose literals change on every request keep a stable structural hash; a change to the code itself changes it.
 
 Manifest entries can also carry a `match` glob for content-hashed bundles.
+
+### Content-hashed bundles
+
+Identity is per file. Next.js, Vite, Nuxt, Astro and webpack builds put a content hash in the file name of every chunk, so a production build renames all of them: `chunks/1ixzeq6_vmaz2.js` becomes `chunks/9c1a4f0b8d2e.js` on the next deploy. Nothing about the page changed, but the diff sees every chunk as `new` and every entry as `removed`, in merchant scope, which fails the gate. If you approve them one by one, the same thing happens on the deploy after that, and the gate gets switched off within a week.
+
+The normaliser does not rescue this on its own. It collapses hash-like tokens (`app.3f9c2a1b.js` becomes `app.[hash].js`), but a whole file name that is itself a hash, with no stable stem next to it, has nothing left to keep. Collapsing those names would be worse than the noise: every chunk in the directory would share one identity, the manifest would hold one entry and all the others would disappear from the inventory.
+
+The fix is one entry for the build output directory:
+
+```bash
+npx scriptlock approve \
+  --match "https://shop.example.com/_next/static/chunks/*.js" \
+  --replace \
+  --owner web --category framework \
+  --justification "Next.js build output, built from this repository by CI"
+```
+
+`scriptlock diff` prints that command for you when three or more new scripts share a directory and differ only in their file names. The entry it writes:
+
+```yaml
+  - id: https://shop.example.com/_next/static/chunks/*.js
+    match: https://shop.example.com/_next/static/chunks/*.js
+    kind: external
+    scope: merchant
+    integrity: track
+    integrityMethod: source-tracked
+    owner: web
+    category: framework
+    justification: Next.js build output, built from this repository by CI
+    approvedBy: v.nizovtsev
+    approvedAt: 2026-09-03
+    coveredAtApproval:
+      count: 12
+      scannedAt: 2026-09-03T09:41:22.184Z
+      ids:
+        - https://shop.example.com/_next/static/chunks/1ixzeq6_vmaz2.js
+        # ... one line per authorised id, capped at 50
+```
+
+The `id` is the glob itself, so the entry is only ever reached through glob matching. Every observed chunk keeps its own identity, its own body hash and its own row in `scriptlock report`: the inventory still lists every file in the directory, and the entry only says that all of them are authorised. `coveredAtApproval` records what the glob authorised on the day it was approved, so the pull request that adds this one line shows how wide it is without anyone rerunning the scan.
+
+Order matters. Run `--match` before `approve --all-new`, or pass `--replace` as above: the exact-id entries for chunk names that will never come back are otherwise left behind, and every later diff reports each of them as `removed`. `scriptlock approve --match` always prints the entries the glob makes redundant; `--replace` deletes them.
+
+The tradeoff, stated plainly: a glob entry authorises anything that matches it. Body integrity for those files comes from your build pipeline, not from Scriptlock. `strict` and `structural` are refused for any glob with a wildcard, because one entry holds one approved hash and it cannot stand for the bodies the glob will match on the next deploy, so a glob entry never carries a `sha256`. Scripts covered by a glob are also exempt from `spoofed` and `moved` detection, since both only fire on scripts with no matching entry. An attacker who can write a new file into that directory gets an authorised script.
+
+So the glob has to stay as narrow as the build output directory, and Scriptlock enforces that rather than asking you to remember it: the text before the wildcard must be an http(s) host plus at least one path segment, the wildcard may not reach past a `/`, and `**`, a leading `!`, `{`, `(` and `|` are refused outright. `/_next/static/chunks/*.js` is accepted; `/*.js`, `<origin>/**` and anything spanning two hosts are not. One glob covers one directory, not its subdirectories: a build that emits `chunks/app/` and `chunks/pages/` needs one entry per directory. A glob that matches scripts in more than one scope is refused too, unless `--scope` names the scope the entry stands for, so a merchant-scope glob cannot quietly authorise a script running inside a provider frame.
+
+Everything outside the glob is unaffected: a script anywhere else, including one directory up, is still reported as `new`, and fails the gate in merchant scope.
 
 ### Integrity policies
 
@@ -295,14 +354,15 @@ scriptlock init   [--url <url>] [--force]         write scriptlock.config.yaml w
 scriptlock scan   [--profile <name>] [--runs N] [--out <file>] [--config <path>] [--json]
 scriptlock diff   [--profile <name>] [--gate|--drift] [--snapshot <file>] [--format text|md|json]
                [--history] [--config <path>] [--out <file>]
-scriptlock approve <id...> [--all-new] --owner <s> --category <c> --justification <s>
+scriptlock approve <id...> [--all-new] [--match <glob>] [--replace] --owner <s> --category <c>
+               --justification <s>
                [--integrity strict|structural|track|url-only] [--integrity-method <m>]
                [--approved-by <s>] [--scope <s>] [--notes <s>] [--refresh] [--headers]
                [--snapshot <file>] [--profile <name>]
 scriptlock report [--profile <name>] [--format md|json] [--snapshot <file>] [--out <file>]
 ```
 
-Global options: `--config <path>`, `--verbose`, `--no-color`. `scan` writes `.scriptlock/last.<profile>.json` unless `--out` is given. `diff` runs a scan unless `--snapshot` is given. `approve` reads the last snapshot unless `--snapshot` is given; `--approved-by` defaults to `git config user.name` or `$USER`, and `approvedAt` is today's UTC date. Categories: `payment`, `functional`, `framework`, `tag-manager`, `analytics`, `marketing`, `advertising`, `consent`, `customer-success`, `security`, `ab-testing`, `cdn`, `other`.
+Global options: `--config <path>`, `--verbose`, `--no-color`. `scan` writes `.scriptlock/last.<profile>.json` unless `--out` is given. `diff` runs a scan unless `--snapshot` is given. `approve` reads the last snapshot unless `--snapshot` is given; `--approved-by` defaults to `git config user.name` or `$USER`, and `approvedAt` is today's UTC date. `approve --match <glob>` writes the single glob entry described in [Content-hashed bundles](#content-hashed-bundles), refuses a glob wider than one directory of one host, and lists every observed script it authorises with that script's scope; it writes one entry, so it cannot be combined with script ids, `--all-new` or `--refresh`. `--replace` (only with `--match`) removes the exact-id entries the glob makes redundant. Categories: `payment`, `functional`, `framework`, `tag-manager`, `analytics`, `marketing`, `advertising`, `consent`, `customer-success`, `security`, `ab-testing`, `cdn`, `other`.
 
 ## GitHub Action
 

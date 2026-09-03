@@ -1,9 +1,11 @@
 /**
  * Terminal rendering of a DiffResult with picocolors.
  *
- * Output: a header line, events grouped by severity (fail, warn, info) and a
- * one-line summary that explains the exit code. Colour is on by default when
- * the terminal supports it and can be forced either way with `color`.
+ * Output: a header line, events grouped by severity (fail, warn, info), any
+ * matching warnings, the hints (a suggestion sentence and the command to
+ * copy, indented under it) and a one-line summary that explains the exit code.
+ * Colour is on by default when the terminal supports it and can be forced
+ * either way with `color`.
  * Limitation: no column wrapping; long ids are printed as-is.
  */
 import pc from 'picocolors';
@@ -66,6 +68,16 @@ export function renderText(result: DiffResult, opts: TextOptions = {}): string {
   if (result.warnings !== undefined && result.warnings.length > 0) {
     lines.push(c.yellow(c.bold(`WARNINGS (${result.warnings.length})`)));
     for (const warning of result.warnings) lines.push(`  ${warning}`);
+    lines.push('');
+  }
+
+  if (result.hints !== undefined && result.hints.length > 0) {
+    lines.push(c.cyan(c.bold(`HINTS (${result.hints.length})`)));
+    for (const hint of result.hints) {
+      const [first = '', ...rest] = hint.split('\n');
+      lines.push(`  ${first}`);
+      for (const line of rest) lines.push(`    ${c.cyan(line)}`);
+    }
     lines.push('');
   }
 

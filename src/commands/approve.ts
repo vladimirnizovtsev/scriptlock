@@ -1,8 +1,9 @@
 /**
  * `scriptlock approve` (DESIGN.md section 8): turn observed scripts and frames
- * from the last snapshot (or `--snapshot`) into manifest entries, re-approve
- * existing entries with their current hashes, refresh tracked hashes with
- * `--refresh`, and record the observed security headers with `--headers`.
+ * from the last snapshot (or `--snapshot`) into manifest entries, authorise a
+ * whole build directory with one glob entry via `--match`, re-approve existing
+ * entries with their current hashes, refresh tracked hashes with `--refresh`,
+ * and record the observed security headers with `--headers`.
  * The manifest is created (headers policy strict, values from the snapshot)
  * when it does not exist yet; `--all-new` also approves every cross-origin
  * frame without an entry and adds headers that are observed but not yet
@@ -12,6 +13,11 @@
  * Limitations: a blocked snapshot is refused (SCAN_BLOCKED) because its
  * inventory is unreliable. Owner, category and justification are required
  * only when a new entry is created; re-approval keeps the existing values.
+ * `--match` writes exactly one entry and therefore cannot be combined with
+ * script ids, `--all-new` or `--refresh`; it lists every id the glob authorises
+ * with its scope (never truncated: the glob is the widest authorisation in the
+ * manifest), and reports the exact-id entries it makes redundant, which
+ * `--replace` removes.
  */
 import { spawnSync, type SpawnSyncOptionsWithStringEncoding } from 'node:child_process';
 import path from 'node:path';
@@ -20,9 +26,12 @@ import { isScriptlockError, ScriptlockError } from '../errors.js';
 import {
   ALL_NEW,
   approveFrames,
+  approveMatch,
   approveScripts,
+  redundantScriptEntries,
   refreshScripts,
   refreshTracked,
+  scriptsMatchingGlob,
   type ApproveFrameMeta,
   type ApproveMeta,
 } from '../manifest/approve.js';
@@ -65,6 +74,13 @@ export interface ApproveCommandOptions {
   ids?: readonly string[] | undefined;
   /** Approve every script and cross-origin frame without an entry. */
   allNew?: boolean | undefined;
+  /**
+   * Authorise every observed script matching this glob with one entry whose
+   * `id` and `match` are the glob. For content-hashed build output.
+   */
+  match?: string | undefined;
+  /** With `--match`: remove the exact-id entries the glob makes redundant. */
+  replace?: boolean | undefined;
   owner?: string | undefined;
   category?: ScriptCategory | undefined;
   justification?: string | undefined;
@@ -97,6 +113,12 @@ export interface ApproveCommandResult {
   framesAdded: string[];
   /** Entries whose lastSeenSha256 or approved hashes were refreshed. */
   refreshed: string[];
+  /** Observed script ids authorised by the `--match` entry, when `--match` was used. */
+  covered?: string[];
+  /** Exact-id entries the `--match` glob makes redundant (removed when `--replace`). */
+  redundant?: string[];
+  /** True when `--replace` removed the redundant entries. */
+  replaced?: boolean;
   /** True when header values were written from the snapshot. */
   headersRecorded: boolean;
 }
@@ -140,10 +162,26 @@ export async function runApprove(ctx: CommandContext, opts: ApproveCommandOption
   const allNew = opts.allNew === true;
   const refresh = opts.refresh === true;
   const headers = opts.headers === true;
-  if (ids.length === 0 && !allNew && !refresh && !headers) {
-    throw new ScriptlockError('UNSUPPORTED', 'nothing to approve: pass at least one script id, --all-new, --refresh or --headers', {
+  const replace = opts.replace === true;
+  const match = opts.match !== undefined && opts.match.trim() !== '' ? opts.match.trim() : undefined;
+  if (ids.length === 0 && !allNew && !refresh && !headers && match === undefined) {
+    throw new ScriptlockError('UNSUPPORTED', 'nothing to approve: pass at least one script id, --match, --all-new, --refresh or --headers', {
       exitCode: 2,
       hint: 'Run "scriptlock scan" and pick ids from its output, or use --all-new to approve every unapproved script',
+    });
+  }
+  if (match !== undefined) {
+    const conflict = ids.length > 0 ? 'script ids' : allNew ? '--all-new' : refresh ? '--refresh' : undefined;
+    if (conflict !== undefined) {
+      throw new ScriptlockError('UNSUPPORTED', `--match writes one glob entry and cannot be combined with ${conflict}`, {
+        exitCode: 2,
+        hint: 'Run "scriptlock approve --match" on its own, then approve the remaining scripts in a second command',
+      });
+    }
+  } else if (replace) {
+    throw new ScriptlockError('UNSUPPORTED', '--replace removes the entries a glob makes redundant and only applies with --match', {
+      exitCode: 2,
+      hint: 'Run "scriptlock approve --match <glob> --replace"',
     });
   }
   assertChoice(opts.category, SCRIPT_CATEGORIES, '--category');
@@ -187,7 +225,16 @@ export async function runApprove(ctx: CommandContext, opts: ApproveCommandOption
   if (opts.notes !== undefined) meta.notes = opts.notes;
 
   let headersRecorded = created;
-  if (refresh) {
+  let covered: string[] | undefined;
+  let coveredScopes: Map<string, Scope> | undefined;
+  let redundant: string[] | undefined;
+  if (match !== undefined) {
+    redundant = redundantScriptEntries(manifest, match).map((entry) => entry.id);
+    manifest = approveMatch(manifest, snapshot, match, meta, { replace });
+    const matched = scriptsMatchingGlob(snapshot, match);
+    covered = matched.map((script) => script.id);
+    coveredScopes = new Map(matched.map((script) => [script.id, script.scope]));
+  } else if (refresh) {
     manifest = refreshTracked(manifest, snapshot);
     const targets = allNew ? [ALL_NEW, ...ids] : ids;
     if (targets.length > 0) manifest = refreshScripts(manifest, snapshot, targets, { approvedBy, approvedAt });
@@ -231,9 +278,18 @@ export async function runApprove(ctx: CommandContext, opts: ApproveCommandOption
     else if (entryKey(previous) !== entryKey(entry)) (refresh ? refreshed : updated).push(entry.id);
   }
   const beforeFrames = new Set(before.frames.map((frame) => frame.match));
-  const framesAdded = manifest.frames.map((frame) => frame.match).filter((match) => !beforeFrames.has(match));
+  const framesAdded = manifest.frames.map((frame) => frame.match).filter((frameMatch) => !beforeFrames.has(frameMatch));
+  const afterIds = new Set(manifest.scripts.map((entry) => entry.id));
+  const removed = before.scripts.map((entry) => entry.id).filter((id) => !afterIds.has(id));
 
-  const unchanged = !created && added.length === 0 && updated.length === 0 && refreshed.length === 0 && framesAdded.length === 0 && JSON.stringify(before.headers) === JSON.stringify(manifest.headers);
+  const unchanged =
+    !created &&
+    added.length === 0 &&
+    updated.length === 0 &&
+    refreshed.length === 0 &&
+    framesAdded.length === 0 &&
+    removed.length === 0 &&
+    JSON.stringify(before.headers) === JSON.stringify(manifest.headers);
   const lines: string[] = [];
   lines.push(`manifest: ${manifestPath} (${created ? 'created' : unchanged ? 'unchanged' : 'updated'})`);
   if (refresh) {
@@ -242,6 +298,7 @@ export async function runApprove(ctx: CommandContext, opts: ApproveCommandOption
   } else {
     const parts = [`${plural(added.length, 'script entry', 'script entries')} added`];
     if (updated.length > 0) parts.push(`${updated.length} re-approved`);
+    if (removed.length > 0) parts.push(`${removed.length} removed as redundant`);
     if (framesAdded.length > 0) parts.push(`${plural(framesAdded.length, 'frame entry', 'frame entries')} added`);
     if (headersRecorded) parts.push(`${plural(Object.keys(manifest.headers.values).length, 'security header')} recorded`);
     lines.push(`  ${parts.join(', ')}`);
@@ -261,11 +318,45 @@ export async function runApprove(ctx: CommandContext, opts: ApproveCommandOption
   listed('added', added);
   listed('re-approved', updated);
   listed('refreshed', refreshed);
+  if (match !== undefined && covered !== undefined) {
+    // Never truncated: this one entry is the widest authorisation in the
+    // manifest, so the approval record must show everything it covered.
+    lines.push(`  the glob ${match} authorises ${plural(covered.length, 'observed script')}:`);
+    for (const id of covered) lines.push(`    ${id} [${coveredScopes?.get(id) ?? 'unknown'}]`);
+    lines.push('  every script it authorises keeps its own identity and body hash in the inventory');
+    lines.push('  this entry authorises anything matching the glob, so the integrity of those bodies comes from your build pipeline, not from scriptlock');
+    lines.push('  it also exempts them from spoofed and moved detection, which only fire on scripts with no matching entry');
+    if (redundant !== undefined && redundant.length > 0) {
+      lines.push(`  ${plural(redundant.length, 'existing entry', 'existing entries')} ${replace ? 'removed as redundant' : 'now redundant'}, because the glob authorises the same ids:`);
+      for (const id of redundant) lines.push(`    ${id}`);
+      if (!replace) {
+        lines.push('    every future diff reports them as removed; re-run with --replace to delete them');
+      }
+    }
+  }
   if (framesAdded.length > 0) {
     lines.push('  frames added:');
-    for (const match of framesAdded.slice(0, limit)) lines.push(`    ${match}`);
+    for (const frameMatch of framesAdded.slice(0, limit)) lines.push(`    ${frameMatch}`);
   }
   ctx.out(lines.join('\n'));
 
-  return { manifest, manifestPath, snapshotPath, created, approvedBy, approvedAt, added, updated, framesAdded, refreshed, headersRecorded };
+  const result: ApproveCommandResult = {
+    manifest,
+    manifestPath,
+    snapshotPath,
+    created,
+    approvedBy,
+    approvedAt,
+    added,
+    updated,
+    framesAdded,
+    refreshed,
+    headersRecorded,
+  };
+  if (covered !== undefined) result.covered = covered;
+  if (redundant !== undefined) {
+    result.redundant = redundant;
+    result.replaced = replace && redundant.length > 0;
+  }
+  return result;
 }

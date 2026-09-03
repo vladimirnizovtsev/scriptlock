@@ -153,6 +153,13 @@ export function buildProgram(state: CliState, io: CliIo, version: string = packa
     .description('add or refresh manifest entries from the last snapshot (or --snapshot)')
     .argument('[ids...]', 'observed script ids to approve (see "scriptlock scan" output)')
     .option('--all-new', 'approve every script and cross-origin frame without an entry')
+    .addOption(
+      new Option(
+        '--match <glob>',
+        'authorise every observed script matching this glob with one entry, for content-hashed build output (e.g. "https://shop.example.com/assets/*.js"); one host and one directory only, integrity is track, so the bodies are not hashed',
+      ).conflicts(['allNew', 'refresh']),
+    )
+    .option('--replace', 'with --match: remove the exact-id entries the glob makes redundant')
     .option('--owner <owner>', 'team or person responsible (required for new entries)')
     .addOption(new Option('--category <category>', 'script category (required for new entries)').choices([...SCRIPT_CATEGORIES]))
     .option('--justification <text>', 'business or technical justification (required for new entries)')
@@ -170,6 +177,8 @@ export function buildProgram(state: CliState, io: CliIo, version: string = packa
         ids: string[],
         options: {
           allNew?: boolean;
+          match?: string;
+          replace?: boolean;
           owner?: string;
           category?: ScriptCategory;
           justification?: string;
@@ -188,6 +197,8 @@ export function buildProgram(state: CliState, io: CliIo, version: string = packa
           profile: options.profile,
           ids,
           allNew: options.allNew === true,
+          match: options.match,
+          replace: options.replace === true,
           owner: options.owner,
           category: options.category,
           justification: options.justification,

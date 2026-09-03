@@ -43,7 +43,7 @@ src/
   manifest/
     schema.ts                 zod schema for scriptlock.lock.yaml
     io.ts                     read / write with stable key order and sorted entries
-    match.ts                  find the manifest entry for an observed script or frame
+    match.ts                  find the manifest entry for an observed script or frame; glob narrowness rules
     approve.ts                add or refresh entries from a snapshot
   diff/
     diff.ts                   Snapshot + Manifest -> DiffResult
@@ -90,6 +90,10 @@ findScriptEntry(manifest: Manifest, observed: ObservedScript): ManifestScript | 
 findFrameEntry(manifest: Manifest, frame: FrameInfo): ManifestFrame | undefined
 isIgnored(manifest: Manifest, id: string): boolean
 approveScripts(manifest, snapshot, ids: string[], meta: ApproveMeta, defaults: IntegrityDefaults): Manifest
+approveMatch(manifest, snapshot, glob: string, meta: ApproveMeta, options?: { replace?: boolean }): Manifest
+scriptsMatchingGlob(snapshot: Snapshot, glob: string): ObservedScript[]
+redundantScriptEntries(manifest: Manifest, glob: string): ManifestScript[]
+globNarrowness(glob: string): { reason: string; hint: string } | undefined
 refreshTracked(manifest, snapshot): Manifest
 
 // diff
@@ -254,7 +258,20 @@ scripts:
 ignore: []
 ```
 
-Matching (`findScriptEntry`): exact `id` equality first; then any entry whose `match` glob matches the observed id (picomatch, `{ nocase: true }`). If several match, the first in file order wins and a warning is added.
+Matching (`findScriptEntry`): exact `id` equality first; then any entry whose `match` glob matches the observed id (picomatch, `{ nocase: true }`). If several match, the first in file order wins and a warning is added. `coveringScriptEntries` returns every entry that authorises an id, exact entries first and then the globs they shadow; the diff uses it to decide which entries were observed, so a glob whose files all have exact entries is not reported as `removed`.
+
+Glob entries (`approve --match <glob>`, `approveMatch`) exist for content-hashed build output, where every deploy renames every chunk and each renamed chunk would otherwise be one `new` plus one `removed` event. One entry is written whose `id` and `match` are both the glob, so exact-id matching never fires for it and every observed script reaches it through the glob while keeping its own identity, body hash and inventory row. `kind` is derived from the matched scripts (their shared value, otherwise `external`).
+
+A glob entry is a forward-looking authorisation that is never checked against a body, so its breadth is bounded by the code rather than by advice (`globNarrowness` in `manifest/match.ts`):
+
+- The glob must contain a wildcard (a wildcard-free glob authorises exactly one id and belongs in an exact entry), the wildcard-free prefix must be an http(s) origin plus at least one path segment, no `/` may follow the wildcard, and `**`, a leading `!`, `{`, `}`, `(`, `)` and `|` are refused. One glob therefore covers one directory of one host, not its subdirectories. `escapeGlob` turns a directory whose name carries metacharacters into glob-safe text; the diff hint uses it and emits a suggestion only when the composed glob is narrow and matches every id in the group.
+- Integrity is `track` / `source-tracked`, and `strict` / `structural` are refused for any glob independently of how many scripts the current snapshot matches. Such an entry never carries `sha256`, `structuralHash` or `lastSeenSha256`; `refreshTracked` and `refreshScripts` leave it untouched, and `approveScripts` adds a new exact entry (which shadows the glob) rather than rewriting the glob when an id it covers is approved on its own.
+- The scope is the one the matched scripts share. A glob matching more than one scope is refused unless `--scope` names the scope deliberately, so a merchant-scope entry cannot authorise a script observed inside a provider frame by majority vote.
+- `coveredAtApproval` (count, snapshot `finishedAt`, up to 50 ids) records what the glob authorised at approval time, so the lockfile carries the breadth evidence and not only the terminal output.
+
+A glob matching no observed script is a `SNAPSHOT_INVALID` error naming the glob and the number of scripts observed. Re-running with the same glob updates that entry instead of adding a second one. `redundantScriptEntries` reports the exact-id entries the glob now covers; `--replace` removes them, otherwise each is a permanent `removed` event once the build renames the chunk. The evidence tradeoff is explicit and is stated in the README: body integrity for the covered files comes from the build pipeline, not from Scriptlock, and scripts a glob covers are also exempt from `spoofed` and `moved` detection.
+
+Owner and justification are the evidence fields, so a value that is still a placeholder (`...`, or text wholly wrapped in `<>`, as printed by `diff`, `init` and the bundle hint) is refused rather than written.
 
 Integrity defaults applied by `approve` when `--integrity` is not given: first-party external (host equals main-frame host or a subdomain) -> `integrity.firstParty` (default `strict`); third-party external -> `integrity.thirdParty` (default `track`); inline -> `integrity.inline` (default `structural`); eval -> `integrity.eval` (default `structural`); `worker` (and any script whose body was not captured) -> `url-only` with method `none`, regardless of party, because there is no body hash to enforce. `approve` refuses `--integrity strict` or `--integrity structural` for such an entry. `integrityMethod` defaults otherwise: `hash-strict` for strict/structural, `source-tracked` for track/url-only.
 
@@ -284,6 +301,8 @@ Severity aggregation: `exitCode` is 2 if any `blocked`, else 1 if any `fail`, el
 
 `moved` detection: build an index of approved sha256 values from strict and structural entries; a `new` script whose sha256 is in the index becomes `moved` instead (message names the original id).
 
+Hints (`DiffResult.hints`): advisory suggestions derived from the events after they are classified. They never change a severity, the summary or the exit code, and every report renders them after the events. Version 1 has one rule, the content-hashed bundle: when three or more `new` events share an origin and a directory and the same file extension while their file stems differ, the result carries one `scriptlock approve --match "<directory>/*.<ext>"` suggestion for that directory (at most one per directory and three in total, largest group first). Only http(s) ids with a file extension and no query string are considered. The directory is escaped with `escapeGlob`, and the suggestion is emitted only when the composed glob passes `globNarrowness` and matches every id in the group, so the printed command always runs. Its placeholders are quoted (`--owner "<team>"`), so the line survives a copy and paste into bash or zsh, and the placeholders are then refused by `approve` rather than written into the manifest.
+
 ## 8. CLI
 
 ```
@@ -291,7 +310,8 @@ scriptlock init   [--url <url>] [--force]         write scriptlock.config.yaml w
 scriptlock scan   [--profile <name>] [--runs N] [--out <file>] [--config <path>] [--json]
 scriptlock diff   [--profile <name>] [--gate|--drift] [--snapshot <file>] [--format text|md|json]
                [--history] [--config <path>] [--out <file>]
-scriptlock approve <id...> [--all-new] --owner <s> --category <c> --justification <s>
+scriptlock approve <id...> [--all-new] [--match <glob>] [--replace] --owner <s> --category <c>
+               --justification <s>
                [--integrity strict|structural|track|url-only] [--integrity-method <m>]
                [--approved-by <s>] [--scope <s>] [--notes <s>] [--refresh] [--headers]
                [--snapshot <file>] [--profile <name>]
@@ -300,7 +320,7 @@ scriptlock report [--profile <name>] [--format md|json] [--snapshot <file>] [--o
 
 - `scan` writes `.scriptlock/last.<profile>.json` (path printed) unless `--out`, and prints a summary table: scripts by scope and kind, third-party hosts, initiator tree depth, headers present.
 - `diff` runs a scan unless `--snapshot` is given, compares to the manifest, prints the report, writes history when `--history` or `profile.history`, exits with `result.exitCode`. When no manifest exists it prints instructions to run `approve --all-new` and exits 1.
-- `approve` reads the last snapshot (or `--snapshot`), adds entries, writes the manifest. `--all-new` approves every script without an entry. `--refresh` updates `lastSeenSha256` on track entries and `sha256`/`structuralHash` on strict/structural entries listed. `--approved-by` defaults to `git config user.name` or `$USER`. `approvedAt` is today (UTC date).
+- `approve` reads the last snapshot (or `--snapshot`), adds entries, writes the manifest. `--all-new` approves every script without an entry. `--match <glob>` writes the single glob entry described in section 6, refuses a glob broader than one directory of one host, and lists every observed script it authorises with that script's scope (never truncated: the entry is the widest authorisation in the manifest) plus the exact-id entries it makes redundant; it writes one entry and therefore cannot be combined with script ids, `--all-new` or `--refresh`. `--replace` (only with `--match`) deletes those redundant entries. `--refresh` updates `lastSeenSha256` on track entries and `sha256`/`structuralHash` on strict/structural entries listed. `--approved-by` defaults to `git config user.name` or `$USER`. `approvedAt` is today (UTC date).
 - `report` renders the inventory with authorisation status (approved / unapproved / stale) grouped by scope, owner and category, as markdown or JSON.
 - Global: `--config <path>`, `--verbose`, `--no-color`. Exit codes: 0 clean, 1 findings, 2 error (blocked, navigation failure, config invalid, browser missing with an install hint).
 
@@ -353,7 +373,7 @@ profiles:
 - `/challenge` page that mimics a Cloudflare interstitial ("Just a moment...") for the blocked detector;
 - an optional dedicated worker entry `/worker.js`.
 
-Unit tests cover normalisation (every rule in section 4.1 with examples), structural hash stability and sensitivity, identity derivation, scope classification incl. configured globs, manifest read/write round trip and stable ordering, matching with globs, approve defaults, every row of the diff matrix, and report rendering snapshots.
+Unit tests cover normalisation (every rule in section 4.1 with examples), structural hash stability and sensitivity, identity derivation, scope classification incl. configured globs, manifest read/write round trip and stable ordering, matching with globs, approve defaults, glob approvals (`approve --match`: one entry created and updated in place, a glob matching nothing refused, strict/structural refused for any wildcard glob, a glob broader than one directory refused, a scope-crossing glob refused without `--scope`, placeholder owner/justification refused, coverage evidence recorded, redundant entries reported and removed with `replace`, and an id covered by a glob approved on its own without touching the glob), glob narrowness and escaping, every row of the diff matrix, the content-hashed bundle hint, and report rendering snapshots.
 
 E2E tests cover: scan captures every script kind listed above with correct scope, `hasSourceURL` and real URL for the spoofed script, headers captured, `approve --all-new` then `diff` is clean, changing the first-party bundle fails under strict, changing vendor.js under track is info, a new script fails gate, a tag inside the tpsp frame is info in gate and warn in drift, the challenge page yields `blocked` and exit 2, and `runs: 2` unions results.
 

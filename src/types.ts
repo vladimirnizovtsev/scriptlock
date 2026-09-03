@@ -265,6 +265,21 @@ export type ScriptCategory =
   | 'cdn'
   | 'other';
 
+/**
+ * What a `match` glob authorised when it was approved. A glob entry is not
+ * checked against any body hash, so the lockfile records the breadth itself:
+ * the reviewer of a pull request sees how many scripts one line authorised and
+ * which ones, without rerunning the scan. `ids` is capped; `count` is exact.
+ */
+export interface CoveredAtApproval {
+  /** Number of observed scripts the glob authorised at approval time. */
+  count: number;
+  /** `Snapshot.finishedAt` of the snapshot the approval was made from. */
+  scannedAt: string;
+  /** The authorised ids, truncated when `count` exceeds the cap. */
+  ids: string[];
+}
+
 export interface ManifestScript {
   /** Scriptlock identity (see ObservedScript.id). Must be unique within the manifest. */
   id: string;
@@ -289,6 +304,8 @@ export interface ManifestScript {
   approvedBy: string;
   /** ISO date (YYYY-MM-DD). */
   approvedAt: string;
+  /** Evidence of what a `match` glob authorised when it was approved. */
+  coveredAtApproval?: CoveredAtApproval;
   /** Free-form notes. */
   notes?: string;
   /** Last observed body change under `track`, maintained by `scriptlock approve --refresh`. */
@@ -388,6 +405,14 @@ export interface DiffResult {
    * several manifest entries (the first in file order was used).
    */
   warnings?: string[];
+  /**
+   * Actionable suggestions derived from the events, rendered by every report
+   * after them. Each hint is one sentence, optionally followed by newline
+   * separated command lines to copy, e.g. the `scriptlock approve --match`
+   * command for a directory of content-hashed bundle chunks. Advisory only:
+   * hints never change severities, the summary or the exit code.
+   */
+  hints?: string[];
 }
 
 // ---------------------------------------------------------------------------

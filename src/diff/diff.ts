@@ -6,13 +6,26 @@
  * from diff/policy.ts. Harness scripts are dropped and ignored ids skipped.
  *
  * When several manifest entries match one id the first in file order wins and
- * a note is added to `result.warnings`. Limitations: spoof detection
- * normalises the claimed sourceURL with the identity module's default
- * configuration unless `identity` is passed; a sourceURL that is not a
- * parseable URL is compared as a raw string only.
+ * a note is added to `result.warnings`. Sibling `new` scripts in one build
+ * directory produce a `scriptlock approve --match` suggestion in
+ * `result.hints`; hints are advisory and never change a severity, the summary
+ * or the exit code. Limitations: spoof detection normalises the claimed
+ * sourceURL with the identity module's default configuration unless `identity`
+ * is passed; a sourceURL that is not a parseable URL is compared as a raw
+ * string only. Hint detection only understands http(s) ids with a file
+ * extension and no query string.
  */
 import { normalizeUrl as realNormalizeUrl } from '../identity/normalize.js';
-import { findFrameEntry, findScriptEntryById, isIgnored, matchingScriptEntries } from '../manifest/match.js';
+import {
+  coveringScriptEntries,
+  escapeGlob,
+  findFrameEntry,
+  findScriptEntryById,
+  globMatches,
+  isIgnored,
+  isNarrowGlob,
+  matchingScriptEntries,
+} from '../manifest/match.js';
 import {
   SECURITY_HEADER_NAMES,
   type DiffEvent,
@@ -62,6 +75,93 @@ function plural(n: number, word: string): string {
 
 function scopeOf(scope: Scope | undefined): { scope?: Scope } {
   return scope === undefined ? {} : { scope };
+}
+
+// ---------------------------------------------------------------------------
+// Hints: content-hashed bundle directories
+// ---------------------------------------------------------------------------
+
+/** Sibling `new` scripts in one directory before a `--match` entry is suggested. */
+export const BUNDLE_HINT_THRESHOLD = 3;
+/** Upper bound on suggestions in one result, one per directory. */
+export const MAX_HINTS = 3;
+
+const EXTENSION = /^[A-Za-z0-9]{1,8}$/;
+
+interface BundleGroup {
+  directory: string;
+  extension: string;
+  stems: Set<string>;
+  ids: string[];
+}
+
+/**
+ * Splits an observed id into the directory it lives in, its file extension and
+ * its file stem. Returns undefined for anything that is not an http(s) URL
+ * with a file name, an extension and no query string (inline, eval, blob and
+ * data ids, and cache-busted URLs, are never bundle chunks).
+ */
+export function bundlePath(id: string): { directory: string; extension: string; stem: string } | undefined {
+  let url: URL;
+  try {
+    url = new URL(id);
+  } catch {
+    return undefined;
+  }
+  if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.search !== '') return undefined;
+  const slash = url.pathname.lastIndexOf('/');
+  if (slash === -1) return undefined;
+  const file = url.pathname.slice(slash + 1);
+  const dot = file.lastIndexOf('.');
+  if (dot <= 0) return undefined;
+  const extension = file.slice(dot + 1);
+  if (!EXTENSION.test(extension)) return undefined;
+  return { directory: `${url.origin}${url.pathname.slice(0, slash)}`, extension, stem: file.slice(0, dot) };
+}
+
+/**
+ * One `scriptlock approve --match` suggestion per directory in which three or
+ * more `new` scripts share the origin, the directory and the extension while
+ * their file stems differ: the content-hashed bundle pattern of Next.js, Vite,
+ * Nuxt, Astro and webpack, where every build renames every chunk.
+ *
+ * The suggested glob is built from the escaped directory, and is emitted only
+ * when it is narrow enough for `approve --match` to accept and actually matches
+ * every id in the group, so the printed command always runs. Its placeholders
+ * are quoted, so the command survives a copy and paste into a shell.
+ */
+export function bundleHints(events: readonly DiffEvent[]): string[] {
+  const groups = new Map<string, BundleGroup>();
+  for (const event of events) {
+    if (event.type !== 'new') continue;
+    const parsed = bundlePath(event.subject);
+    if (parsed === undefined) continue;
+    const key = `${parsed.directory} ${parsed.extension}`;
+    const group = groups.get(key) ?? { directory: parsed.directory, extension: parsed.extension, stems: new Set<string>(), ids: [] };
+    group.stems.add(parsed.stem);
+    group.ids.push(event.subject);
+    groups.set(key, group);
+  }
+  const candidates = [...groups.values()]
+    .filter((group) => group.stems.size >= BUNDLE_HINT_THRESHOLD)
+    .sort((a, b) => b.stems.size - a.stems.size || (a.directory < b.directory ? -1 : a.directory > b.directory ? 1 : 0));
+
+  const hints: string[] = [];
+  const directories = new Set<string>();
+  for (const group of candidates) {
+    if (hints.length >= MAX_HINTS) break;
+    if (directories.has(group.directory)) continue;
+    const glob = `${escapeGlob(group.directory)}/*.${group.extension}`;
+    // A directory whose name carries glob metacharacters, or that is not one
+    // directory below a host, cannot be suggested: the command would be refused.
+    if (!isNarrowGlob(glob) || !group.ids.every((id) => globMatches(glob, id))) continue;
+    directories.add(group.directory);
+    hints.push(
+      `${group.stems.size} new scripts under ${group.directory}/ differ only in their file name, which is the content-hashed bundle pattern: every build renames them, so every deploy reports them as new. One entry can authorise that one directory, not its subdirectories, at the price of hashing none of their bodies:\n` +
+        `scriptlock approve --match "${glob}" --owner "<team>" --category framework --justification "<why this build directory is authorised>"`,
+    );
+  }
+  return hints;
 }
 
 export function diff(options: DiffOptions & DiffExtras): DiffResult {
@@ -119,7 +219,9 @@ export function diff(options: DiffOptions & DiffExtras): DiffResult {
         `script ${script.id} matches ${matches.length} manifest entries (${matches.map((m) => m.id).join(', ')}); the first in file order was used`,
       );
     }
-    for (const match of matches) observedEntries.add(match); // shadowed entries count as observed, not removed
+    // Every entry that authorises this id counts as observed, including a glob
+    // shadowed by an exact entry; otherwise the glob is `removed` for ever.
+    for (const match of coveringScriptEntries(manifest, script.id)) observedEntries.add(match);
     if (isIgnored(manifest, script.id)) continue;
 
     if (entry) {
@@ -330,5 +432,6 @@ export function diff(options: DiffOptions & DiffExtras): DiffResult {
     summary,
     exitCode,
     warnings,
+    hints: bundleHints(events),
   };
 }

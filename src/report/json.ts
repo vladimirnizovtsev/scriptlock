@@ -3,7 +3,8 @@
  *
  * Keys are emitted in a fixed order (the order declared in types.ts) so the
  * output is stable across runs and diffable. Observed scripts never carry
- * `source`. Limitation: unknown extra keys on inputs are dropped.
+ * `source`. `warnings` and `hints` are emitted only when they are not empty.
+ * Limitation: unknown extra keys on inputs are dropped.
  */
 import type { DiffEvent, DiffResult, ManifestFrame, ManifestScript, ObservedScript } from '../types.js';
 
@@ -106,6 +107,7 @@ export function resultToJson(result: DiffResult): Json {
     events: result.events.map(eventToJson),
   };
   if (result.warnings !== undefined && result.warnings.length > 0) out['warnings'] = [...result.warnings];
+  if (result.hints !== undefined && result.hints.length > 0) out['hints'] = [...result.hints];
   return out;
 }
 

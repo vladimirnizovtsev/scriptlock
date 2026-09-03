@@ -1,8 +1,9 @@
 /**
  * Adding and refreshing manifest entries from a snapshot (`scriptlock approve`).
  *
- * Owns: `approveScripts()`, `approveFrames()`, `refreshTracked()`,
- * `refreshScripts()`, `ApproveMeta`, `ApproveFrameMeta`, `ApproveHelpers`.
+ * Owns: `approveScripts()`, `approveMatch()`, `approveFrames()`,
+ * `refreshTracked()`, `refreshScripts()`, `redundantScriptEntries()`,
+ * `ApproveMeta`, `ApproveFrameMeta`, `ApproveHelpers`.
  *
  * All functions are pure: they return a new Manifest and never mutate the
  * input. Integrity defaults follow DESIGN.md section 6. First-party detection
@@ -12,10 +13,18 @@
  * by the frame origin. Limitations: the main origin comes from the snapshot's
  * main frame, falling back to `finalUrl`; a snapshot without either cannot
  * classify parties and treats everything as third-party.
+ *
+ * A glob entry created by `approveMatch()` authorises many bodies and is never
+ * pinned to one of them: `strict` and `structural` are refused, no hash is
+ * written, both refresh paths leave it alone, and `approveScripts()` adds a new
+ * exact entry rather than overwriting the glob when one of the ids it covers is
+ * approved on its own. The glob itself must pass `globNarrowness` (one
+ * directory of one host).
  */
 import { ScriptlockError } from '../errors.js';
 import { isFirstParty as identityIsFirstParty } from '../identity/identity.js';
 import type {
+  CoveredAtApproval,
   FrameInfo,
   IntegrityDefaults,
   IntegrityMethod,
@@ -26,9 +35,10 @@ import type {
   ObservedScript,
   Scope,
   ScriptCategory,
+  ScriptKind,
   Snapshot,
 } from '../types.js';
-import { findFrameEntry, findScriptEntry, isIgnored } from './match.js';
+import { findFrameEntry, findScriptEntry, globMatches, globNarrowness, isIgnored } from './match.js';
 
 export interface ApproveMeta {
   owner?: string;
@@ -114,6 +124,25 @@ export function defaultIntegrityFor(
   return isFirstParty(firstPartySubject(observed), mainOrigin) ? defaults.firstParty : defaults.thirdParty;
 }
 
+/** Punctuation-only text (`...`) or an unfilled `<placeholder>` from a printed command. */
+const PLACEHOLDER = /^(?:[.<>\s]*|<[^<>]*>)$/;
+
+/**
+ * The manifest is the evidence artifact, so a field that still holds the
+ * placeholder printed by `diff`, `init` or a hint is refused rather than
+ * written: `justification: ...` documents nothing.
+ */
+export function isPlaceholder(value: string): boolean {
+  return PLACEHOLDER.test(value.trim());
+}
+
+function assertNotPlaceholder(subject: string, field: string, value: string): void {
+  if (!isPlaceholder(value)) return;
+  throw new ScriptlockError('UNSUPPORTED', `Approving ${subject} requires a real ${field}, not the placeholder "${value}"`, {
+    hint: `Replace the placeholder from the printed command with the actual ${field}`,
+  });
+}
+
 function requireMeta(id: string, meta: ApproveMeta): { owner: string; category: ScriptCategory; justification: string } {
   const missing: string[] = [];
   if (meta.owner === undefined || meta.owner === '') missing.push('owner');
@@ -124,6 +153,8 @@ function requireMeta(id: string, meta: ApproveMeta): { owner: string; category: 
       hint: 'Pass --owner, --category and --justification',
     });
   }
+  assertNotPlaceholder(id, 'owner', meta.owner as string);
+  assertNotPlaceholder(id, 'justification', meta.justification as string);
   return { owner: meta.owner as string, category: meta.category as ScriptCategory, justification: meta.justification as string };
 }
 
@@ -192,6 +223,8 @@ function newScriptEntry(observed: ObservedScript, snapshot: Snapshot, meta: Appr
 function updatedScriptEntry(existing: ManifestScript, observed: ObservedScript, meta: ApproveMeta): ManifestScript {
   const notCaptured = bodyNotCaptured(observed);
   assertHashable(existing.id, meta, notCaptured);
+  if (meta.owner !== undefined && meta.owner !== '') assertNotPlaceholder(existing.id, 'owner', meta.owner);
+  if (meta.justification !== undefined && meta.justification !== '') assertNotPlaceholder(existing.id, 'justification', meta.justification);
   const integrity = notCaptured ? 'url-only' : (meta.integrity ?? existing.integrity);
   const integrityMethod = notCaptured
     ? (meta.integrityMethod ?? 'none')
@@ -224,9 +257,15 @@ function updatedScriptEntry(existing: ManifestScript, observed: ObservedScript, 
  * Approves scripts from the snapshot. `ids` are observed ids, or the literal
  * `*` for every script without an entry (and not ignored). An id not present
  * in the snapshot throws SNAPSHOT_INVALID. Re-approving an existing entry
- * (exact id, or an entry whose glob matches) refreshes its hashes, approver
- * and date, drops `lastSeenSha256`, and keeps owner, category and
+ * (exact id, or a pinned entry whose glob matches) refreshes its hashes,
+ * approver and date, drops `lastSeenSha256`, and keeps owner, category and
  * justification unless new values are given.
+ *
+ * An id covered by an unpinned glob entry (`approve --match`) gets its own new
+ * exact entry instead: the glob holds no hash and stands for many bodies, so
+ * rewriting it from one observation would pin the whole directory to that one
+ * script and report every sibling as `changed`. The exact entry wins over the
+ * glob in `matchingScriptEntries`, so both coexist.
  */
 export function approveScripts(
   manifest: Manifest,
@@ -238,7 +277,8 @@ export function approveScripts(
 ): Manifest {
   const scripts = [...manifest.scripts];
   for (const observed of resolveScriptIds(manifest, snapshot, ids)) {
-    const existing = scripts.find((entry) => entry.id === observed.id) ?? findScriptEntry({ ...manifest, scripts }, observed);
+    const matched = scripts.find((entry) => entry.id === observed.id) ?? findScriptEntry({ ...manifest, scripts }, observed);
+    const existing = matched !== undefined && isUnpinnedGlobEntry(matched) && matched.id !== observed.id ? undefined : matched;
     if (existing === undefined) {
       scripts.push(newScriptEntry(observed, snapshot, meta, defaults, helpers));
     } else {
@@ -246,6 +286,191 @@ export function approveScripts(
       scripts[index] = updatedScriptEntry(existing, observed, meta);
     }
   }
+  return { ...manifest, scripts };
+}
+
+// ---------------------------------------------------------------------------
+// Glob entries (`scriptlock approve --match`)
+// ---------------------------------------------------------------------------
+
+/** Integrity of a glob entry when neither the flag nor an existing entry says otherwise. */
+export const GLOB_INTEGRITY: IntegrityPolicy = 'track';
+
+/**
+ * Observed scripts (harness excluded, deduplicated by id, in snapshot order)
+ * whose id matches `glob` under the manifest matching rules.
+ */
+export function scriptsMatchingGlob(snapshot: Snapshot, glob: string): ObservedScript[] {
+  const seen = new Set<string>();
+  const out: ObservedScript[] = [];
+  for (const script of snapshot.scripts) {
+    if (script.scope === 'harness' || seen.has(script.id)) continue;
+    if (!globMatches(glob, script.id)) continue;
+    seen.add(script.id);
+    out.push(script);
+  }
+  return out;
+}
+
+/** The kind shared by every matched script, otherwise `external`. */
+function commonKind(covered: readonly ObservedScript[]): ScriptKind {
+  const first = covered[0]?.kind;
+  if (first === undefined) return 'external';
+  return covered.every((script) => script.kind === first) ? first : 'external';
+}
+
+/** Every distinct scope among the matched scripts, in first-observed order. */
+function coveredScopes(covered: readonly ObservedScript[]): Scope[] {
+  const scopes: Scope[] = [];
+  for (const script of covered) if (!scopes.includes(script.scope)) scopes.push(script.scope);
+  return scopes;
+}
+
+/** Ids the glob authorised at approval time, capped so one entry stays readable. */
+export const COVERAGE_EVIDENCE_LIMIT = 50;
+
+function coverageEvidence(snapshot: Snapshot, covered: readonly ObservedScript[]): CoveredAtApproval {
+  return {
+    count: covered.length,
+    scannedAt: snapshot.finishedAt,
+    ids: covered.slice(0, COVERAGE_EVIDENCE_LIMIT).map((script) => script.id),
+  };
+}
+
+/**
+ * True for a `match` entry that was never pinned to a single body: it
+ * authorises many scripts with many bodies, so there is no hash to refresh.
+ */
+function isUnpinnedGlobEntry(entry: ManifestScript): boolean {
+  return entry.match !== undefined && entry.sha256 === undefined && entry.structuralHash === undefined;
+}
+
+/**
+ * Exact-id entries that the glob now also authorises. After `approve --match`
+ * they are dead weight: the chunk names they hold are content-hashed and never
+ * come back, so every later diff reports each of them as `removed`.
+ */
+export function redundantScriptEntries(manifest: Manifest, glob: string): ManifestScript[] {
+  return manifest.scripts.filter((entry) => entry.match === undefined && entry.id !== glob && globMatches(glob, entry.id));
+}
+
+/** Options for `approveMatch`. */
+export interface ApproveMatchOptions {
+  /** Remove the exact-id entries the glob makes redundant (`approve --match --replace`). */
+  replace?: boolean;
+}
+
+function assertNarrowGlob(glob: string): void {
+  const problem = globNarrowness(glob);
+  if (problem === undefined) return;
+  throw new ScriptlockError(
+    'UNSUPPORTED',
+    `Refusing the glob ${glob}: ${problem.reason}. A glob entry authorises every id that matches it, on this deploy and on every future one, and none of those bodies is ever hashed`,
+    { hint: problem.hint },
+  );
+}
+
+/**
+ * Creates or updates the single entry that authorises every observed script
+ * matching `glob` (content-hashed build output). The entry's `id` and `match`
+ * are both the glob, so it is only ever reached through glob matching and each
+ * observed script keeps its own identity and body hash in the inventory.
+ *
+ * The glob must be narrow (see `globNarrowness`): one directory of one http(s)
+ * host, with the wildcard inside that directory. `kind` is derived from the
+ * matched scripts (their shared value, otherwise `external`). The scope is
+ * theirs when they share one; a glob that spans scopes is refused unless
+ * `meta.scope` names the scope deliberately, because a merchant-scope glob
+ * must not silently authorise a script running in a provider frame.
+ *
+ * Integrity is `track` / `source-tracked`: the glob stands for many bodies now
+ * and for unknown bodies later, so `strict` and `structural` are refused and no
+ * sha256 or structuralHash is ever written on the entry. `coveredAtApproval`
+ * records what the glob authorised when it was approved, so the lockfile itself
+ * carries the breadth evidence.
+ *
+ * Throws SNAPSHOT_INVALID when the glob matches nothing.
+ */
+export function approveMatch(
+  manifest: Manifest,
+  snapshot: Snapshot,
+  glob: string,
+  meta: ApproveMeta,
+  options: ApproveMatchOptions = {},
+): Manifest {
+  assertNarrowGlob(glob);
+  const covered = scriptsMatchingGlob(snapshot, glob);
+  if (covered.length === 0) {
+    const observed = snapshot.scripts.filter((script) => script.scope !== 'harness').length;
+    throw new ScriptlockError(
+      'SNAPSHOT_INVALID',
+      `Glob ${glob} matches none of the ${observed} scripts observed in the snapshot for profile ${snapshot.profile}`,
+      {
+        hint: 'The glob is matched against observed script ids (normalised URLs), not against file paths; check it against "scriptlock scan" output',
+      },
+    );
+  }
+
+  const redundant = options.replace === true ? new Set(redundantScriptEntries(manifest, glob)) : new Set<ManifestScript>();
+  const scripts = manifest.scripts.filter((entry) => !redundant.has(entry));
+  const index = scripts.findIndex((entry) => entry.id === glob || entry.match === glob);
+  const existing = index === -1 ? undefined : scripts[index];
+  const integrity = meta.integrity ?? existing?.integrity ?? GLOB_INTEGRITY;
+  if (integrity === 'strict' || integrity === 'structural') {
+    throw new ScriptlockError(
+      'UNSUPPORTED',
+      `Cannot apply ${integrity} integrity to the glob ${glob}: it authorises ${covered.length} observed script${covered.length === 1 ? '' : 's'} today and any file matching it tomorrow, while one entry holds a single approved hash, which cannot stand for all of their bodies`,
+      {
+        hint: 'Use --integrity track (the default for a glob) and assure the bodies of these files in the build pipeline, or approve each id on its own with --integrity strict',
+      },
+    );
+  }
+
+  const scopes = coveredScopes(covered);
+  if (meta.scope === undefined && scopes.length > 1) {
+    throw new ScriptlockError(
+      'UNSUPPORTED',
+      `The glob ${glob} matches scripts in ${scopes.length} scopes (${scopes.join(', ')}) and one entry records one scope, so it would authorise scripts outside the scope it names`,
+      {
+        hint: `Narrow the glob, or name the scope the entry stands for with --scope ${scopes[0] as string} (the scripts in the other scopes then stay unapproved)`,
+      },
+    );
+  }
+
+  const required =
+    existing === undefined
+      ? requireMeta(glob, meta)
+      : {
+          owner: meta.owner !== undefined && meta.owner !== '' ? meta.owner : existing.owner,
+          category: meta.category ?? existing.category,
+          justification: meta.justification !== undefined && meta.justification !== '' ? meta.justification : existing.justification,
+        };
+  if (existing !== undefined) {
+    assertNotPlaceholder(glob, 'owner', required.owner);
+    assertNotPlaceholder(glob, 'justification', required.justification);
+  }
+  const integrityMethod =
+    meta.integrityMethod ?? (existing !== undefined && existing.integrity === integrity ? existing.integrityMethod : defaultIntegrityMethod(integrity));
+  const notes = meta.notes ?? existing?.notes;
+
+  const entry: ManifestScript = {
+    id: existing?.id ?? glob,
+    match: glob,
+    kind: commonKind(covered),
+    scope: meta.scope ?? (scopes[0] as Scope),
+    integrity,
+    integrityMethod,
+    owner: required.owner,
+    category: required.category,
+    justification: required.justification,
+    approvedBy: meta.approvedBy,
+    approvedAt: meta.approvedAt,
+    coveredAtApproval: coverageEvidence(snapshot, covered),
+    ...(notes !== undefined ? { notes } : {}),
+  };
+
+  if (index === -1) scripts.push(entry);
+  else scripts[index] = entry;
   return { ...manifest, scripts };
 }
 
@@ -335,7 +560,9 @@ export function approveFrames(manifest: Manifest, snapshot: Snapshot, matches: r
 /**
  * Updates `lastSeenSha256` on every `track` entry observed with a body that
  * differs from the approved `sha256`; removes it when the body matches again.
- * Entries not observed are left untouched.
+ * Entries not observed are left untouched, and so is a `match` glob entry that
+ * carries no approved hash: it covers many bodies, so recording one of them
+ * would claim a body the entry never approved.
  */
 export function refreshTracked(manifest: Manifest, snapshot: Snapshot): Manifest {
   const observedFor = new Map<ManifestScript, ObservedScript>();
@@ -347,6 +574,7 @@ export function refreshTracked(manifest: Manifest, snapshot: Snapshot): Manifest
   const scripts = manifest.scripts.map((entry) => {
     const observed = observedFor.get(entry);
     if (observed === undefined) return entry;
+    if (isUnpinnedGlobEntry(entry)) return entry; // one glob, many bodies: nothing to track
     if (observed.sha256 === undefined) return entry; // body not captured: nothing to track
     if (entry.sha256 === observed.sha256) {
       if (entry.lastSeenSha256 === undefined) return entry;
@@ -365,7 +593,8 @@ export function refreshTracked(manifest: Manifest, snapshot: Snapshot): Manifest
  * listed entries from the snapshot without changing approval metadata, unless
  * `approvedBy` / `approvedAt` are given. `ids` may be `*` for every entry
  * that was observed. An id with no manifest entry or not observed throws
- * SNAPSHOT_INVALID.
+ * SNAPSHOT_INVALID. A `match` glob entry with no approved hash is left
+ * untouched: it covers many bodies and none of them is the approved one.
  */
 export function refreshScripts(
   manifest: Manifest,
@@ -397,7 +626,7 @@ export function refreshScripts(
     targets.add(entry);
   }
   const scripts = manifest.scripts.map((entry) => {
-    if (!targets.has(entry)) return entry;
+    if (!targets.has(entry) || isUnpinnedGlobEntry(entry)) return entry;
     const observed = observedFor.get(entry) as ObservedScript;
     const { lastSeenSha256: _dropped, sha256: _sha, structuralHash: _struct, ...rest } = entry;
     void _dropped;

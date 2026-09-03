@@ -2,7 +2,8 @@
  * Markdown rendering for PR comments and GITHUB_STEP_SUMMARY.
  *
  * `renderMarkdown` renders a DiffResult: a heading, a result line, a table of
- * fail and warn events and a collapsed <details> block for info events.
+ * fail and warn events, the hints (each a sentence followed by its command in
+ * an indented code block) and a collapsed <details> block for info events.
  * `renderInventoryMarkdown` renders the script inventory of a snapshot with
  * its authorisation status against the manifest, grouped by scope, then by
  * owner and category. Hashes are shortened to 12 hex characters.
@@ -95,6 +96,22 @@ export function renderMarkdown(result: DiffResult): string {
     lines.push('');
     for (const warning of result.warnings) lines.push(`- ${warning}`);
     lines.push('');
+  }
+
+  if (result.hints !== undefined && result.hints.length > 0) {
+    lines.push(`### Hints (${result.hints.length})`);
+    lines.push('');
+    for (const hint of result.hints) {
+      const [first = '', ...rest] = hint.split('\n');
+      lines.push(flatten(first));
+      if (rest.length > 0) {
+        lines.push('');
+        // Indented code block: renders as code without backticks, so a command
+        // containing them cannot unbalance a fence.
+        for (const line of rest) lines.push(`    ${line}`);
+      }
+      lines.push('');
+    }
   }
 
   if (infos.length > 0) {

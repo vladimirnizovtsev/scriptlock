@@ -73,6 +73,13 @@ function orderedScript(s: ManifestScript): Record<string, unknown> {
   out['justification'] = s.justification;
   out['approvedBy'] = s.approvedBy;
   out['approvedAt'] = s.approvedAt;
+  if (s.coveredAtApproval !== undefined) {
+    out['coveredAtApproval'] = {
+      count: s.coveredAtApproval.count,
+      scannedAt: s.coveredAtApproval.scannedAt,
+      ids: [...s.coveredAtApproval.ids],
+    };
+  }
   if (s.notes !== undefined) out['notes'] = s.notes;
   if (s.lastSeenSha256 !== undefined) out['lastSeenSha256'] = s.lastSeenSha256;
   return out;

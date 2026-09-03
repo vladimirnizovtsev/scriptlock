@@ -146,3 +146,28 @@ describe('markdown keeps long code spans whole and backticks balanced', () => {
     balancedBackticks(renderMarkdown(result));
   });
 });
+
+describe('renderMarkdown: hints', () => {
+  const CHUNKS = 'https://shop.example.com/_next/static/chunks';
+  const COMMAND = `scriptlock approve --match "${CHUNKS}/*.js" --owner "<team>" --category framework --justification "<why this build directory is authorised>"`;
+
+  it('renders a hints section with the command in an indented code block', () => {
+    const scripts = ['1ixzeq6_vmaz2', '2hh4ipina8zdg', 'turbopack-1l_s3wnkx96or'].map((stem, index) => {
+      const id = `${CHUNKS}/${stem}.js`;
+      return makeScript({ id, url: id, rawUrl: id, sha256: hex(String(index + 1)) });
+    });
+    const result = diff({ snapshot: makeSnapshot({ scripts }), manifest: makeManifest(), mode: 'gate', normalizeUrl: fakeNormalizeUrl });
+    const md = renderMarkdown(result);
+    expect(md).toContain('### Hints (1)');
+    expect(md).toContain(`3 new scripts under ${CHUNKS}/ differ only in their file name`);
+    expect(md).toContain(`\n    ${COMMAND}\n`);
+    expect(md.indexOf('| Type |')).toBeLessThan(md.indexOf('### Hints'));
+    balancedBackticks(md);
+    expect(md).not.toMatch(/—/);
+  });
+
+  it('renders no hints section when there is nothing to suggest', () => {
+    const result = diff({ snapshot: makeSnapshot(), manifest: makeManifest(), mode: 'gate', normalizeUrl: fakeNormalizeUrl });
+    expect(renderMarkdown(result)).not.toContain('### Hints');
+  });
+});

@@ -126,7 +126,7 @@ export async function runInit(ctx: CommandContext, opts: InitCommandOptions = {}
       'Next steps:',
       '  1. Edit the profile URL (and steps) in scriptlock.config.yaml.',
       '  2. scriptlock scan                 record every script and header of the page',
-      '  3. scriptlock approve --all-new --owner <team> --category <category> --justification "<why>"',
+      '  3. scriptlock approve --all-new --owner "<team>" --category "<category>" --justification "<why these scripts belong on the page>"',
       '  4. scriptlock diff --gate          compare a fresh scan with the manifest; exit 0 clean, 1 findings, 2 run error',
     ].join('\n'),
   );
