@@ -4,7 +4,7 @@ Thank you for taking the time. Scriptlock is small and opinionated; the fastest 
 
 ## Development setup
 
-Requirements: Node 20 or later, npm, and a machine that can run Chromium.
+Requirements: Node 22 or later, npm, and a machine that can run Chromium.
 
 ```sh
 git clone https://github.com/vladimirnizovtsev/scriptlock.git
@@ -25,7 +25,7 @@ Useful commands:
 | `npm run test:watch` | Vitest in watch mode |
 | `npm run build` | tsup bundle plus `tsc --emitDeclarationOnly` into `dist/` |
 
-CI runs typecheck, both test projects and the build on Node 20 and 22 for every push and pull request.
+CI runs typecheck, both test projects and the build on Node 22 and 24 for every push and pull request.
 
 ## Where things live
 

@@ -359,7 +359,7 @@ E2E tests cover: scan captures every script kind listed above with correct scope
 
 ## 11. Conventions
 
-- TypeScript strict, ESM, Node 20+. No default exports except for user flow modules.
+- TypeScript strict, ESM, Node 22+. No default exports except for user flow modules.
 - Errors thrown to the CLI are `ScriptlockError` with a `code` and an `exitCode`; the CLI prints `error: <message>` and exits accordingly.
 - No network access in unit tests. E2E tests use only the fixture server.
 - Every module file starts with a short comment stating what it owns and its known limitations.

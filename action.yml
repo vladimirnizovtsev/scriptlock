@@ -29,7 +29,7 @@ inputs:
   node-version:
     description: Node.js version passed to actions/setup-node.
     required: false
-    default: "20"
+    default: "22"
   version:
     description: scriptlock version to install from npm.
     required: false
@@ -55,7 +55,7 @@ runs:
   using: composite
   steps:
     - name: Set up Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: ${{ inputs.node-version }}
 
@@ -140,7 +140,7 @@ runs:
 
     - name: Upload .scriptlock as a run artifact
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: scriptlock-${{ inputs.profile }}-${{ github.job }}
         path: ${{ inputs.working-directory }}/.scriptlock

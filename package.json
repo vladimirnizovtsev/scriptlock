@@ -27,7 +27,7 @@
   "homepage": "https://github.com/vladimirnizovtsev/scriptlock#readme",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "bin": {
     "scriptlock": "./dist/cli.js"

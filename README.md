@@ -41,7 +41,7 @@ The March 2025 information supplement is non-normative, but it describes the mod
 
 ## Quick start
 
-Requirements: Node 20 or later. Scriptlock depends on `playwright-core` and ships no browser; the Playwright-managed Chromium build is installed once.
+Requirements: Node 22 or later (Node 20 reached end of life on 30 April 2026). Scriptlock depends on `playwright-core` and ships no browser; the Playwright-managed Chromium build is installed once.
 
 ```sh
 npm install --save-dev scriptlock
@@ -75,7 +75,7 @@ jobs:
   drift:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: vladimirnizovtsev/scriptlock@v1
         with:
           mode: drift
@@ -312,7 +312,7 @@ The repository root contains a composite action. It installs Node and `scriptloc
     profile: default          # profile from scriptlock.config.yaml
     mode: gate                # gate | drift
     config: scriptlock.config.yaml
-    node-version: "20"
+    node-version: "22"
     version: latest           # scriptlock version to install
     history: "false"          # also write .scriptlock/history/<profile>/
     working-directory: .
