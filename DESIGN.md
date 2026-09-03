@@ -330,7 +330,7 @@ integrity:
 profiles:
   default:
     url: https://shop.example.com/checkout
-    wait: networkidle
+    wait: load
     settleMs: 3000
     runs: 1
     history: false

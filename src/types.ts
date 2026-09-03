@@ -394,6 +394,12 @@ export interface DiffResult {
 // Configuration: scriptlock.config.yaml
 // ---------------------------------------------------------------------------
 
+/**
+ * Navigation wait condition. `load` is the default: `networkidle` waits for two
+ * seconds without network activity, which many real storefronts never reach
+ * (analytics beacons, long polling, ad refresh), so it times out rather than
+ * collecting. Raise `settleMs` instead when tags load late.
+ */
 export type WaitUntil = 'load' | 'domcontentloaded' | 'networkidle' | 'commit';
 
 /** One step of the declarative flow DSL. Exactly one key per step. */

@@ -88,7 +88,7 @@ const profileNameSchema = z
 const profileSchema = z.strictObject({
   url: z.url({ protocol: /^https?$/ }),
   steps: z.union([z.array(flowStepSchema), z.string().min(1)]).optional(),
-  wait: waitUntilSchema.default('networkidle'),
+  wait: waitUntilSchema.default('load'),
   settleMs: z.number().int().nonnegative().default(DEFAULT_SETTLE_MS),
   runs: z.number().int().positive().default(1),
   manifest: z.string().min(1).optional(),
@@ -172,7 +172,7 @@ export function toScriptlockConfig(parsed: ConfigSchemaOutput): ScriptlockConfig
 export function defaultProfile(url: string = DEFAULT_PROFILE_URL): ProfileConfig {
   return {
     url,
-    wait: 'networkidle',
+    wait: 'load',
     settleMs: DEFAULT_SETTLE_MS,
     runs: 1,
     history: false,

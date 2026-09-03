@@ -249,7 +249,7 @@ integrity:
 profiles:
   default:
     url: https://shop.example.com/checkout
-    wait: networkidle        # load | domcontentloaded | networkidle | commit
+    wait: load               # load | domcontentloaded | networkidle | commit
     settleMs: 3000           # idle time after the last step, to catch late tags
     runs: 1                  # runs unioned per scan
     history: false           # persist snapshots and diffs under .scriptlock/history/<profile>/
@@ -273,6 +273,8 @@ profiles:
       - waitFor: "#payment-element iframe"
       - wait: 2000
 ```
+
+`wait` defaults to `load`. Avoid `networkidle`: it waits for two seconds of network silence, and a storefront with analytics beacons, long polling or refreshing ads never goes quiet, so the scan times out instead of collecting. When tags arrive late, raise `settleMs` rather than changing `wait`.
 
 Available steps: `goto`, `click`, `fill`, `select`, `waitFor`, `wait`, `press`, `screenshot`. For anything more, `steps: ./checkout-flow.ts` loads a module whose default export is `async (page: Page) => void`; `.js` and `.mjs` are imported directly, `.ts` needs `tsx` installed. See [examples/checkout-flow.ts](examples/checkout-flow.ts). Authenticated flows reuse a Playwright `storageState` file via `browser.storageState`.
 

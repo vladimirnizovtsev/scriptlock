@@ -15,12 +15,12 @@ export default async function checkoutFlow(page: Page): Promise<void> {
   const base = new URL(page.url());
 
   // Put something in the cart so the checkout renders a payment form.
-  await page.goto(new URL('/product/42', base).toString(), { waitUntil: 'networkidle' });
+  await page.goto(new URL('/product/42', base).toString(), { waitUntil: 'load' });
   await page.getByRole('button', { name: 'Add to cart' }).click();
 
   // Go to checkout and fill the fields that gate the payment step. Use a dedicated
   // scanner account or guest checkout, never a real customer.
-  await page.goto(new URL('/checkout', base).toString(), { waitUntil: 'networkidle' });
+  await page.goto(new URL('/checkout', base).toString(), { waitUntil: 'load' });
   await page.fill('#email', 'scriptlock-scan@example.com');
   await page.fill('#postal-code', '10115');
 

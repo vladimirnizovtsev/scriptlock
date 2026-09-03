@@ -84,7 +84,10 @@ profiles:
     # steps:
     #   - goto: /checkout
     #   - waitFor: "#payment-element iframe"
-    wait: networkidle # load | domcontentloaded | networkidle | commit
+    # load is the default. networkidle waits for two seconds of network silence, which many
+    # real storefronts never reach (analytics beacons, long polling, ads), so it times out.
+    # Raise settleMs instead when tags load late.
+    wait: load # load | domcontentloaded | networkidle | commit
     settleMs: ${DEFAULT_SETTLE_MS} # idle time after the last step, to catch late tags
     runs: 1 # scans unioned per run; absence must hold in all runs
     history: false # keep snapshots and diffs under .scriptlock/history/default/

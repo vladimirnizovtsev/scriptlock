@@ -16,7 +16,7 @@ describe('config defaults', () => {
     expect(config.integrity).toEqual({ firstParty: 'strict', thirdParty: 'track', inline: 'structural', eval: 'structural' });
     expect(config.profiles['default']).toEqual({
       url: 'https://shop.example.com/checkout',
-      wait: 'networkidle',
+      wait: 'load',
       settleMs: 3000,
       runs: 1,
       history: false,
@@ -39,7 +39,7 @@ describe('config defaults', () => {
     expect(config.identity.collapseHashes).toBe(true);
     expect(config.profiles['checkout']).toEqual({
       url: 'https://shop.example.com/',
-      wait: 'networkidle',
+      wait: 'load',
       settleMs: 3000,
       runs: 2,
       history: false,

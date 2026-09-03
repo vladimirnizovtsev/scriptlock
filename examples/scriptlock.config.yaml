@@ -68,7 +68,7 @@ profiles:
       - fill: { selector: "#email", value: "scriptlock-scan@example.com" }
       - waitFor: "#payment-element iframe"
       - wait: 2000
-    wait: networkidle                      # load | domcontentloaded | networkidle | commit
+    wait: load                             # load | domcontentloaded | networkidle | commit
     settleMs: 3000                         # idle time after the last step, to catch late tags
     runs: 2                                # scans unioned per run; absence must hold in all runs
     history: true                          # keep snapshots and diffs under .scriptlock/history/default/
@@ -78,7 +78,7 @@ profiles:
   preview:
     url: ${PREVIEW_URL}
     steps: ./examples/checkout-flow.ts     # module escape hatch; .ts needs tsx installed
-    wait: networkidle
+    wait: load
     settleMs: 3000
     runs: 1
     manifest: scriptlock.lock.yaml            # share the default manifest
@@ -87,7 +87,7 @@ profiles:
   # A second page with its own manifest: scriptlock.account.lock.yaml.
   account:
     url: https://shop.example.com/account/payment-methods
-    wait: networkidle
+    wait: load
     settleMs: 2000
     runs: 1
     history: false
