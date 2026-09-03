@@ -4,7 +4,7 @@ Scriptlock is a lockfile for everything that executes in the browser. It opens a
 
 It is built for agencies, product teams and development teams that run a custom or embedded (iframe) checkout with a repository and CI, and that need three things from one tool: a script inventory with written justifications, change detection on a schedule, and a gate that blocks a deploy when the payment page picks up code nobody approved.
 
-> Status: 0.1.0, the first release. Every feature described here is implemented and covered by tests, and the
+> Status: early, the 0.1.x line. Every feature described here is implemented and covered by tests, and the
 > tool has been run against real storefronts, but it is new and has not yet been used in an assessment.
 > Expect the manifest format and the CLI to change before 1.0; breaking changes will be listed in the
 > [changelog](CHANGELOG.md).
@@ -58,10 +58,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: vladimirnizovtsev/scriptlock@v0.1.0
+        with:
+          persist-credentials: false
+      # Pin the action to a release tag or, better, a full commit SHA, and pin the npm
+      # version too. "latest" would silently change what produced two weekly reports.
+      - uses: vladimirnizovtsev/scriptlock@v0.2.0
         with:
           mode: drift
-          history: true
+          history: "true"
+          version: "0.2.0"
 ```
 
 Approve a single script later with its id, refine an entry's policy, or refresh tracked hashes:
@@ -370,7 +375,7 @@ Production scans stop at the rendered payment form. Never fill in or submit a ca
 
 Bot management (Cloudflare, Akamai, DataDome and others) must allowlist the scanner. Scriptlock ships no stealth patches, deliberately: an evidence tool that hides from your own defences is not one you can explain to an assessor.
 
-- Send a scanner token through `browser.extraHeaders` and match it in a skip or allow rule (Cloudflare Super Bot Fight Mode skip rules or IP Access rules, Akamai custom bot categories, DataDome custom rules). The token is sent only to the profile host, its subdomains and any host listed in `browser.extraHeadersHosts`; it is stripped from requests to third-party script hosts and provider iframes, so it is not disclosed to them. Keep it low-privilege and scoped to the scanner regardless.
+- Send a scanner token through `browser.extraHeaders` and match it in a skip or allow rule (Cloudflare Super Bot Fight Mode skip rules or IP Access rules, Akamai custom bot categories, DataDome custom rules). The token is added only to requests to the profile host, its subdomains and any host listed in `browser.extraHeadersHosts`; it is never attached to a request to a third-party script host or a provider iframe, and a request Scriptlock's request router does not see at all — one made by a Service Worker, for example — carries no token either, because the header is added per request rather than set on the whole browser context. Keep it low-privilege and scoped to the scanner regardless.
 - Run the scan from static egress IPs (a self-hosted runner or a fixed NAT) and allowlist those.
 - If a run still lands on a challenge page, Scriptlock records it as `blocked` and exits 2 instead of reporting an empty or wrong inventory. Every snapshot records the user agent, browser build and host name so the evidence states its own vantage point.
 
@@ -380,7 +385,7 @@ Bot management (Cloudflare, Akamai, DataDome and others) must allowlist the scan
 scriptlock init   [--url <url>] [--force]         write scriptlock.config.yaml with a "default" profile
 scriptlock scan   [--profile <name>] [--runs N] [--out <file>] [--config <path>] [--json]
 scriptlock diff   [--profile <name>] [--gate|--drift] [--snapshot <file>] [--format text|md|json]
-               [--history] [--config <path>] [--out <file>]
+               [--history|--no-history] [--config <path>] [--out <file>]
 scriptlock approve <id...> [--all-new] [--match <glob>] [--replace] --owner <s> --category <c>
                --justification <s>
                [--integrity strict|structural|track|url-only] [--integrity-method <m>]
@@ -389,7 +394,7 @@ scriptlock approve <id...> [--all-new] [--match <glob>] [--replace] --owner <s> 
 scriptlock report [--profile <name>] [--format md|json] [--snapshot <file>] [--out <file>]
 ```
 
-Global options: `--config <path>`, `--verbose`, `--no-color`. `scan` writes `.scriptlock/last.<profile>.json` unless `--out` is given. `diff` runs a scan unless `--snapshot` is given, and that scan replaces `.scriptlock/last.<profile>.json` so `approve` can act on what the diff just reported; a blocked scan is written to `.scriptlock/blocked.<profile>.json` instead, so a challenge page cannot destroy the last good snapshot. `approve` reads the last snapshot unless `--snapshot` is given; `--approved-by` defaults to `git config user.name` or `$USER`, and `approvedAt` is today's UTC date. `approve --match <glob>` writes the single glob entry described in [Content-hashed bundles](#content-hashed-bundles), refuses a glob wider than one directory of one host, and lists every observed script it authorises with that script's scope; it writes one entry, so it cannot be combined with script ids, `--all-new` or `--refresh`. `--replace` (only with `--match`) removes the exact-id entries the glob makes redundant. Categories: `payment`, `functional`, `framework`, `tag-manager`, `analytics`, `marketing`, `advertising`, `consent`, `customer-success`, `security`, `ab-testing`, `cdn`, `other`.
+Global options: `--config <path>`, `--verbose`, `--no-color`. `scan` writes `.scriptlock/last.<profile>.json` unless `--out` is given. `diff` runs a scan unless `--snapshot` is given, and that scan replaces `.scriptlock/last.<profile>.json` so `approve` can act on what the diff just reported; a blocked scan is written to `.scriptlock/blocked.<profile>.json` instead, so a challenge page cannot destroy the last good snapshot. `--history` and `--no-history` both override the profile's `history` setting; with neither, the profile decides, so a script that runs `diff` twice over one scan can pass `--no-history` to the second and leave exactly one line in the history index. `approve` reads the last snapshot unless `--snapshot` is given; `--approved-by` defaults to `git config user.name` or `$USER`, and `approvedAt` is today's UTC date. `approve --match <glob>` writes the single glob entry described in [Content-hashed bundles](#content-hashed-bundles), refuses a glob wider than one directory of one host, and lists every observed script it authorises with that script's scope; it writes one entry, so it cannot be combined with script ids, `--all-new` or `--refresh`. `--replace` (only with `--match`) removes the exact-id entries the glob makes redundant. Categories: `payment`, `functional`, `framework`, `tag-manager`, `analytics`, `marketing`, `advertising`, `consent`, `customer-success`, `security`, `ab-testing`, `cdn`, `other`.
 
 Exit codes: 0 clean, 1 findings at fail severity (or no manifest yet), 2 run error — a blocked scan, a navigation failure, an invalid configuration, a missing browser, a usage error, or a Node older than 22. `scriptlock` with no command prints help and exits 2, so a dropped argument in CI is never mistaken for a finding.
 
@@ -399,28 +404,51 @@ Scriptlock is a CLI. The package also has an importable entry point, but at 0.1.
 
 ## GitHub Action
 
-The repository root contains a composite action. It installs Node and `scriptlock`, installs Chromium, runs `scriptlock diff`, writes the markdown report to the job summary, prints the text report to the log, uploads `.scriptlock/` as a run artifact and exits with Scriptlock's exit code.
+The repository root contains a composite action. It validates its inputs, installs Node and `scriptlock`, installs Chromium, runs `scriptlock diff` once (the diff performs the scan), writes the markdown report to the job summary and the log, uploads `.scriptlock/` as a run artifact and exits with Scriptlock's exit code. The diff owns the scan on purpose: that is where the blocked-snapshot guard lives, so a challenge page is written to `.scriptlock/blocked.<profile>.json` and the last good snapshot survives.
 
-On a public repository a run artifact is downloadable by anyone, and the snapshot inside it names every script URL on the scanned page, the final URL and the full `content-security-policy`. Set `artifact: "false"` when the page must not be described publicly.
+The action is versioned by its git ref, not by npm: the runner reads `action.yml` from the ref in `uses:`, so a fix to the action reaches you when you change that ref. Pin it to a full commit SHA (best) or to a release tag; the `version:` input separately pins the npm package that produces the evidence.
 
 ```yaml
-- uses: vladimirnizovtsev/scriptlock@v0.1.0
+- uses: vladimirnizovtsev/scriptlock@v0.2.0
   with:
     profile: default          # profile from scriptlock.config.yaml
     mode: gate                # gate | drift
-    config: scriptlock.config.yaml
+    config: scriptlock.config.yaml  # default is empty: look up .yaml, then .yml
     node-version: "22"
-    version: "0.1.0"          # scriptlock version to install; "latest" is the default
+    version: "0.2.0"          # npm version of the CLI; "latest" is not reproducible
     history: "false"          # also write .scriptlock/history/<profile>/
-    working-directory: .
+    working-directory: .      # the manifest and .scriptlock/ resolve against this
+    summary: "true"           # publish the report to the job summary and the log
     artifact: "true"          # upload .scriptlock/ as a run artifact
+    artifact-name: ""         # default scriptlock-<profile>-<job id>
     retention-days: "90"      # clamped to the repository maximum, 90 on public repos
 ```
 
-Outputs: `exit-code` (0, 1 or 2) and `summary-file` (path to the markdown report). Two copy-paste workflows are in [examples/workflows](examples/workflows):
+`config` is resolved relative to `working-directory`, but the manifest and `.scriptlock/` are resolved against `working-directory` itself and not against the configuration file, so a configuration in a subdirectory needs `working-directory` pointed at that subdirectory as well. `artifact-name` matters for a matrix: the default name contains the profile and the job id, so a matrix that varies anything else produces two legs with one name and the second upload fails with a conflict.
+
+Outputs:
+
+| Output | Value |
+|---|---|
+| `exit-code` | `0` clean, `1` findings at fail severity or no manifest yet, `2` run error. `2` is also reported when the run failed before the diff (an invalid input, a failed install), so it is never empty. |
+| `summary-file` | Absolute path of the markdown report, or empty when none was written — a first run with no manifest writes no report. Handle a missing file. |
+| `report-written` | `"true"` when the report exists at `summary-file`. |
+
+### What the action publishes, and to whom
+
+The report names the scanned URL, every script URL on the page and, when a header changes, the full `content-security-policy` value. It goes to three places, with different audiences:
+
+- The **job summary and the job log**: on a public repository these are readable by anyone, with no GitHub account. `summary: "false"` publishes only the counts and the exit code there, and keeps the gate red exactly as before; the report is still written to `.scriptlock/`.
+- The **run artifact**: downloadable by any signed-in GitHub user with no relationship to your repository, while its name, size and digest are readable with no account at all. `artifact: "false"` turns the upload off, and covers only the upload.
+
+No input of this action may carry a secret. The runner echoes each composite step's whole `env:` block into the job log, and inputs pass through it. Authentication for the scan goes through `browser.extraHeaders` and `browser.storageState` in `scriptlock.config.yaml`, fed from `secrets.*` in your own workflow's `env:` block, which the runner masks.
+
+The action's own `uses:` references are pinned to full commit SHAs, and your pin of this action is worth having for the same reason: a pin is not transitive, so while this action referenced `actions/upload-artifact@v7`, whoever could move that tag had code execution in every Scriptlock job.
+
+Two copy-paste workflows are in [examples/workflows](examples/workflows):
 
 - [scriptlock-weekly.yml](examples/workflows/scriptlock-weekly.yml): scheduled `drift` run every Monday at 06:00 UTC with history enabled. GitHub emails the person who last edited the cron line when a scheduled workflow fails.
-- [scriptlock-deploy-gate.yml](examples/workflows/scriptlock-deploy-gate.yml): `gate` run on every pull request against a preview deployment, with the report posted as a pull request comment.
+- [scriptlock-deploy-gate.yml](examples/workflows/scriptlock-deploy-gate.yml): `gate` run on pull requests from the same repository, against a preview deployment, with the report posted as a pull request comment. A pull request from a fork gets a read-only `GITHUB_TOKEN` whatever the workflow's `permissions:` say, so the example still gates but skips the comment there.
 
 The action is also usable without GitHub: run the same commands in any CI that can install Node and Chromium.
 

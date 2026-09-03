@@ -36,7 +36,13 @@ export interface DiffCommandOptions {
   /** Snapshot file to compare instead of scanning (relative to cwd). */
   snapshot?: string | undefined;
   format?: DiffFormat | undefined;
-  /** Append the snapshot and result under `.scriptlock/history/<profile>/` (also when `profile.history`). */
+  /**
+   * Whether to append the snapshot and result under `.scriptlock/history/<profile>/`.
+   * Tri-state: `undefined` follows `profile.history`, `true` and `false` both override
+   * it. A caller that runs `diff` more than once for one scan (the GitHub Action did)
+   * needs the explicit `false`, or a profile with `history: true` writes one index line
+   * per invocation and the evidence trail double-counts itself.
+   */
   history?: boolean | undefined;
   /** Write the report to this file (relative to cwd) instead of standard output. */
   out?: string | undefined;
@@ -163,7 +169,7 @@ export async function runDiff(ctx: CommandContext, opts: DiffCommandOptions): Pr
     ctx.out(report);
   }
 
-  if (opts.history === true || loaded.profile.history) {
+  if (opts.history ?? loaded.profile.history) {
     const historyPath = await appendHistory(historyDir(ctx.cwd), opts.profile, snapshot, result);
     outcome.historyPath = historyPath;
     if (ctx.verbose) ctx.err(`history written to ${historyPath}`);

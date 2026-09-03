@@ -4,9 +4,55 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.2.0] - 2026-09-03
+
+Numbered 0.2.0 rather than 0.1.1: it began as a one-line fix to the artifact upload, and the audit that followed turned it into added inputs, an added output, an added CLI flag and a change to how the scanner sends `browser.extraHeaders`. Added behaviour is a minor version, and calling it a patch would understate what a reader has to check.
+
+Everything in this release is in `action.yml` and its documentation, plus the two CLI changes the action needed. **To get any of it, change the action reference in your workflow**: `uses: vladimirnizovtsev/scriptlock@v0.2.0`, or re-pin the commit SHA. The `version:` input, which selects the npm package, is not involved — the runner reads `action.yml` from the git ref, never from npm — so bumping `version:` alone leaves the action unchanged.
+
 ### Fixed
 
-- The GitHub Action uploaded no run artifact. `actions/upload-artifact` has skipped hidden files by default since v4.4, and the uploaded path `.scriptlock` starts with a dot, so every run logged "No files were found with the provided path" and the snapshot and diff history that the action exists to preserve were silently discarded. Found by running the action against the demo storefront.
+- The GitHub Action uploaded no run artifact. `actions/upload-artifact` has skipped hidden files by default since v4.4, and the uploaded path `.scriptlock` starts with a dot, so every run logged "No files were found with the provided path" and the snapshot and diff history that the action exists to preserve were silently discarded. Found by running the action against the [demo storefront](https://github.com/vladimirnizovtsev/scriptlock-demo-shop).
+
+  Detection was never affected. The gate and drift verdicts and the exit code come from the diff, not from the upload, so no 0.1.0 run reported a wrong result and there is nothing to re-audit. What was lost is the evidence artifact, and it cannot be recovered: GitHub cannot attach artifacts to a finished run, and re-running today produces today's evidence, not the dated evidence of that run. `history: true` did not preserve it either — `.scriptlock/history/` is gitignored and neither example workflow commits it, so those files existed only inside the artifact that was never uploaded. Treat the 0.1.0 window as a gap in the artifact trail, and re-run on 0.2.0 to start producing artifacts again.
+
+- The action ran `scriptlock scan` before `scriptlock diff`, which silently disabled the blocked-snapshot guard: `scan --out` honours its path unconditionally, so a bot-management challenge page overwrote `.scriptlock/last.<profile>.json` with a one-script challenge inventory, and the run then aborted before writing any report. The action now runs `scriptlock diff` once and lets the diff perform the scan, which is where the guard lives — a challenge page is written to `.scriptlock/blocked.<profile>.json`, the last good snapshot is left alone, the `blocked` event is reported and the report is still published. The page is also scanned once instead of twice.
+
+- The action wrote two history entries per run whenever the profile set `history: true`, so `.scriptlock/history/<profile>/index.jsonl` double-counted every run: it invoked `diff` twice and the CLI ORed `--history` with the profile setting. The action now runs one diff, and its `history` input is authoritative in both directions (see `--no-history` below).
+
+- `exit-code` and `summary-file` are no longer empty when the run fails before the diff (an invalid input, a failed install, a blocked scan under the old pre-scan step). `exit-code` is now always 0, 1 or 2 — 2 when the diff did not run, which is a run error — and `summary-file` is set only when the report file exists, with a new `report-written` output saying so.
+
+- A first run with no manifest yet no longer produces a job summary consisting of one content-free line. The diff's stderr — the `scriptlock approve --all-new …` instructions — is now included in the job summary, where it is actually read.
+
+- `action.yml` documentation corrections: `exit-code` no longer names three run-error cases the output could not carry, `summary-file` no longer claims a report that may not exist, and the `config` input states that the manifest and `.scriptlock/` resolve against `working-directory`, not against the configuration file.
+
+### Added
+
+- `scriptlock diff --no-history`: suppresses history even when the profile sets `history: true`. `--history` / `--no-history` / neither is a tri-state, with the profile setting as the default, so a caller that diffs twice over one scan can keep exactly one history entry.
+- Action input `summary` (default `"true"`): with `"false"` the job summary and the job log carry only the counts and the exit code, not the report. The report names the scanned URL, every script URL and, on a header event, the full `content-security-policy`; on a public repository the job summary and the log are readable with no GitHub account at all, which `artifact: "false"` never affected.
+- Action input `artifact-name` (default the previous `scriptlock-<profile>-<job id>`): a matrix that varies anything other than the profile produced two legs with the same artifact name, and the second upload failed with a conflict.
+- Action output `report-written`.
+- `.github/dependabot.yml` for the `github-actions` and `npm` ecosystems, so the pinned SHAs below are maintained rather than left to rot.
+- A unit test over `action.yml` and every workflow in `.github/workflows` and `examples/workflows`: it asserts the artifact upload sets `include-hidden-files`, that every declared input is used, that the `version` default matches `package.json`, that outputs come from a step that always runs, and that every `uses:` is pinned to a full commit SHA. That is the defect class of this release; end-to-end behaviour of the action is still verified only by running it against a live deployment.
+
+### Changed
+
+- The action installs with `npm install -g --ignore-scripts`, so no lifecycle script of the package or its dependencies runs in a job that may hold secrets. Nothing in the tree needs one; the browser is installed by the explicit Chromium step.
+- The `version` input defaults to `0.2.0` instead of `latest`. A scheduled control that produces evidence must not silently change what it runs between two weekly reports; `latest` still works and is documented as non-reproducible.
+- The action validates its inputs before installing anything, and now also rejects a `profile` that is not a safe file-name segment, a multi-line `config`, `working-directory` or `artifact-name` (both are interpolated into shell and into upload-artifact's newline-separated path patterns), and a non-numeric `retention-days`.
+- The artifact upload uses `if-no-files-found: error`. The default `warn` is what let this release's own defect ship green.
+- The action's `uses:` references, both example workflows and the repository's own CI are pinned to full commit SHAs. A consumer who pins `vladimirnizovtsev/scriptlock` by SHA still executed whatever `actions/upload-artifact@v7` pointed at that day, so the pin bought less than it appeared to.
+- `actions/checkout` runs with `persist-credentials: false` in the examples and in CI, so the job token is not left in `.git/config` inside a directory that gets uploaded.
+- `action.yml` is no longer in the npm package's `files`. The runner reads it from the git ref; in the tarball it could never be executed and only suggested that the npm version carried the action.
+
+### Security
+
+- `browser.extraHeaders` is no longer set as `extraHTTPHeaders` on the browser context. The headers were previously put on every request and stripped again by a route handler, which does not see requests made by a Service Worker — so a service worker on the scanned page could have carried the scanner token to a third-party host. The headers are now added by that same route handler, and only for the profile host, its subdomains and `browser.extraHeadersHosts`, so a request the router never sees carries no token. Externally visible behaviour is unchanged.
+- The `artifact` input's disclosure warning covered only the artifact. It now covers the job summary and the job log, and `summary: "false"` turns those off. The README's "downloadable by anyone" is corrected: the artifact zip needs a signed-in GitHub account, while its name, size and digest — and the run page with the job summary — are readable anonymously.
+- `action.yml` and the README state that no input of this action may carry a secret: the runner echoes each composite step's `env:` block into the job log, and inputs are passed through it. Authentication belongs in `browser.extraHeaders` / `browser.storageState`, fed from `secrets.*` in the caller's own `env:`.
+- The deploy-gate example documents that it targets same-repository pull requests and guards its comment step accordingly: on a fork pull request GitHub issues a read-only token regardless of the declared `permissions:`, so the comment step would 403 and fail the job after a clean gate.
 
 ## [0.1.0] - 2026-09-03
 
@@ -39,5 +85,6 @@ First release.
 - Fixture site and server for e2e tests; unit tests for every rule in the design.
 - Documentation: README with limits, requirement mapping, evidence guidance and comparison; CONTRIBUTING, SECURITY.
 
-[Unreleased]: https://github.com/vladimirnizovtsev/scriptlock/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/vladimirnizovtsev/scriptlock/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/vladimirnizovtsev/scriptlock/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/vladimirnizovtsev/scriptlock/releases/tag/v0.1.0

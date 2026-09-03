@@ -150,7 +150,8 @@ export function buildProgram(state: CliState, io: CliIo, version: string = packa
     .addOption(new Option('--drift', 'drift mode for the scheduled run: broader severities').conflicts('gate'))
     .option('--snapshot <file>', 'compare this snapshot instead of scanning')
     .addOption(new Option('--format <format>', 'report format').choices([...DIFF_FORMATS]).default('text'))
-    .option('--history', 'append the snapshot and result under .scriptlock/history/<profile>/ (also when profile.history is set)')
+    .option('--history', 'append the snapshot and result under .scriptlock/history/<profile>/ (the default is the profile\'s history setting)')
+    .option('--no-history', 'do not append history, even when profile.history is set (for a second diff over one scan)')
     .option('--out <file>', 'write the report to this file instead of standard output')
     .addHelpText('after', `\nSeverity matrix (gate vs drift):\n${indent(renderPolicyTable())}`)
     .action(
@@ -160,7 +161,8 @@ export function buildProgram(state: CliState, io: CliIo, version: string = packa
           mode: options.drift === true ? 'drift' : 'gate',
           snapshot: options.snapshot,
           format: options.format,
-          history: options.history === true,
+          // Passed through as a tri-state: undefined means "follow profile.history".
+          history: options.history,
           out: options.out,
         });
         state.exitCode = outcome.exitCode;

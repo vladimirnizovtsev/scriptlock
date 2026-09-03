@@ -67,6 +67,27 @@ Signed-off-by: Jane Doe <jane@example.com>
 
 Pull requests with unsigned commits will be asked to rebase with `git rebase --signoff`.
 
+## Releasing
+
+Releasing the GitHub Action is a git tag, not an npm publish. The runner reads `action.yml` from the ref in `uses:` and never from the npm tarball, so a release that only bumps the npm version leaves every action consumer on the old `action.yml` — which is exactly how the 0.1.0 artifact defect would have survived 0.2.0.
+
+1. Update `CHANGELOG.md`, `package.json`, the `version` input default in `action.yml` and the `uses:` and `version:` lines in `README.md` and `examples/workflows/`. `test/unit/action.test.ts` fails when the `version` default and `package.json` disagree.
+2. `npm run typecheck && npm test && npm run build && npm pack --dry-run`.
+3. Tag the exact version and push it, then publish a GitHub release for that tag:
+
+   ```sh
+   git tag -a v0.2.0 -m "v0.2.0" && git push origin v0.2.0
+   ```
+
+4. Advance the moving tags, so a workflow that pinned a tag rather than a SHA can receive the fix at all. `v0.1` tracks the latest patch of the 0.1 line and `v0` tracks the latest 0.x release; before 1.0 a minor may break, so say so in the changelog when `v0` crosses one.
+
+   ```sh
+   git tag -f v0.1 v0.2.0 && git push -f origin v0.1
+   git tag -f v0   v0.2.0 && git push -f origin v0
+   ```
+
+5. `npm publish` for the CLI. When the release is action-only, say so in the changelog entry: users must change their `uses:` ref, and bumping the `version:` input changes nothing.
+
 ## Reporting bugs and vulnerabilities
 
 Bugs: open an issue using the bug report template. Vulnerabilities in Scriptlock itself: do not open an issue; follow [SECURITY.md](SECURITY.md).

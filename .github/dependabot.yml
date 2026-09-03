@@ -1,0 +1,26 @@
+# Keeps the SHA-pinned action references moving. Dependabot understands a full commit
+# SHA with a `# vX.Y.Z` comment and updates both together; without this the pins rot.
+#
+# The github-actions ecosystem covers .github/workflows/ and the composite action.yml at
+# the repository root. It does not read examples/workflows/, which are documentation:
+# update those by hand when a Dependabot pull request lands, so a copy-paste user does
+# not start from a stale pin.
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps"
+    groups:
+      dev-dependencies:
+        dependency-type: development

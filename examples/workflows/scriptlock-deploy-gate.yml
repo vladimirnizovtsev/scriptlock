@@ -6,6 +6,13 @@
 # under the strict policy changed. Approve the change by editing scriptlock.lock.yaml in the
 # same pull request (`scriptlock approve <id> ...`), so the manifest change is reviewed with
 # the code change that caused it.
+#
+# This targets pull requests from branches of the same repository. On a pull request from a
+# fork GitHub issues a read-only GITHUB_TOKEN whatever `permissions:` below says, so the
+# comment step would fail with 403 even when the gate itself was clean; it is skipped there,
+# and the report stays in the job summary. Most preview-deployment setups do not produce a
+# preview URL for a fork either. For forks, split this into a `pull_request` job that gates
+# and a `workflow_run` job that comments.
 name: Scriptlock deploy gate
 
 on:
@@ -26,7 +33,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Keeps the job token out of .git/config, in a tree this job uploads.
+          persist-credentials: false
 
       # Replace this step with whatever produces your preview URL: a deployment step's
       # output, a deployment_status event, or a URL derived from the branch name.
@@ -37,20 +47,24 @@ jobs:
       # Pin to a release tag or, better, a full commit SHA for supply chain hygiene.
       - name: Scriptlock
         id: scriptlock
-        uses: vladimirnizovtsev/scriptlock@v0.1.0
+        uses: vladimirnizovtsev/scriptlock@v0.2.0
         env:
           # The "preview" profile in scriptlock.config.yaml has `url: ${PREVIEW_URL}` and
           # `manifest: scriptlock.lock.yaml`, so the preview is checked against the same
-          # manifest as production.
+          # manifest as production. Secrets belong here, in the caller's own env: block,
+          # never in an input — composite step environments are echoed into the job log.
           PREVIEW_URL: ${{ steps.preview.outputs.url }}
           SCRIPTLOCK_SCANNER_TOKEN: ${{ secrets.SCRIPTLOCK_SCANNER_TOKEN }}
         with:
           profile: preview
           mode: gate
+          version: "0.2.0"
 
       - name: Comment on the pull request
-        if: always()
-        uses: actions/github-script@v9
+        # always(), so a failing gate still comments; the fork check, because a fork pull
+        # request has a read-only token and this step would 403 and turn a clean gate red.
+        if: always() && github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
           SUMMARY_FILE: ${{ steps.scriptlock.outputs.summary-file }}
           EXIT_CODE: ${{ steps.scriptlock.outputs.exit-code }}
@@ -58,6 +72,8 @@ jobs:
           script: |
             const fs = require('fs');
             const marker = '<!-- scriptlock-deploy-gate -->';
+            // summary-file is empty when the diff wrote no report (no manifest yet, or a
+            // failure before the diff), so both the empty value and a missing file count.
             const file = process.env.SUMMARY_FILE || '.scriptlock/diff.preview.md';
             let report;
             try {
@@ -66,7 +82,7 @@ jobs:
               report = 'Scriptlock did not produce a report. Check the job log.';
             }
             const code = process.env.EXIT_CODE || 'unknown';
-            const status = code === '0' ? 'clean' : code === '1' ? 'findings' : 'run error';
+            const status = code === '0' ? 'clean' : code === '1' ? 'findings (or no manifest yet)' : 'run error';
             const body = `${marker}\n## Scriptlock deploy gate: ${status} (exit code ${code})\n\n${report}`;
             const { owner, repo } = context.repo;
             const issue_number = context.payload.pull_request.number;

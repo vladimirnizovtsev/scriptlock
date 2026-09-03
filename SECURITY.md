@@ -15,7 +15,7 @@ In scope:
 - The `scriptlock` npm package: the CLI, the collector, identity and integrity logic, manifest handling and reporting.
 - The composite GitHub Action in `action.yml` and the example workflows.
 - Ways to make Scriptlock report a wrong inventory or a clean diff for a page that changed, for example a script that evades collection, an identity collision, a manifest match that is broader than intended, or a `sourceURL` trick that is not flagged as spoofed. These are the bugs that matter most for this project.
-- Handling of configuration and environment variables, for example a token from `browser.extraHeaders` leaking into snapshots, history files or reports.
+- Handling of configuration and environment variables, for example a token from `browser.extraHeaders` leaking into snapshots, history files or reports, reaching a host outside the profile host and `browser.extraHeadersHosts`, or an input of the GitHub Action that would publish a secret into a public job log.
 
 Out of scope:
 
@@ -32,3 +32,5 @@ Only the latest release on npm receives fixes. There are no long-term support br
 ## Handling of scan data
 
 Scriptlock runs entirely on the machine that executes it. It does not send snapshots, manifests, headers or script sources anywhere. Snapshots never contain script source text, but they do contain URLs, hashes, headers and the vantage point (user agent, browser build, and the host name of the scanning machine); treat `.scriptlock/` and the run artifacts with the same care as the rest of your build output.
+
+Under the GitHub Action the same description of the page is published three times: to the run artifact (`artifact`), to the job summary and to the job log (`summary`). On a public repository the job summary and the log are readable with no GitHub account, and the artifact by any signed-in GitHub user. No input of the action may carry a secret, because the runner echoes each composite step's `env:` block into the job log; authentication for a scan goes through `browser.extraHeaders` or `browser.storageState` in the configuration, fed from `secrets.*` in the caller's own workflow, which the runner masks.

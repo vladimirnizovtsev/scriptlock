@@ -148,14 +148,16 @@ async function runOnce(
   if (browserCfg.locale !== undefined) contextOptions.locale = browserCfg.locale;
   if (browserCfg.timezoneId !== undefined) contextOptions.timezoneId = browserCfg.timezoneId;
   if (browserCfg.storageState !== undefined) contextOptions.storageState = browserCfg.storageState;
-  if (browserCfg.extraHeaders !== undefined && Object.keys(browserCfg.extraHeaders).length > 0) {
-    contextOptions.extraHTTPHeaders = browserCfg.extraHeaders;
-  }
+  // `browser.extraHeaders` is deliberately NOT set as `extraHTTPHeaders` on the
+  // context: that would put the token on every request the context makes and
+  // leave stripping it again to the route handler, which does not see requests a
+  // Service Worker makes. The headers are added per request by applyExtraHeaders
+  // instead, so a request the router never sees carries no token.
 
   const context = await launched.browser.newContext(contextOptions);
   context.setDefaultTimeout(browserCfg.timeoutMs);
   context.setDefaultNavigationTimeout(browserCfg.timeoutMs);
-  await restrictExtraHeaders(context, browserCfg, profile.url);
+  await applyExtraHeaders(context, browserCfg, profile.url);
   let capture: Capture | undefined;
   try {
     const page: Page = await context.newPage();
@@ -202,12 +204,18 @@ async function runOnce(
 }
 
 /**
- * Keeps `browser.extraHeaders` from leaking to third parties: the headers are
- * set on the context (so CDP capture is unaffected), and this route strips
- * them from every request whose host is not the profile host, a subdomain of
- * it, or listed in `browser.extraHeadersHosts` (DESIGN.md 3.1).
+ * Adds `browser.extraHeaders` to a request only when its host is the profile
+ * host, a subdomain of it, or listed in `browser.extraHeadersHosts`
+ * (DESIGN.md 3.1). Every other request — third-party script hosts, provider
+ * iframes, and any request this route never sees, such as one made by a
+ * Service Worker — is sent without them, so the failure direction is "no
+ * token" rather than "token disclosed".
+ *
+ * Any header of the same name already on the request (a page-set header, or a
+ * leftover on a redirect) is removed on a non-allowed host, so the guarantee
+ * does not depend on where the header came from.
  */
-async function restrictExtraHeaders(context: BrowserContext, cfg: BrowserConfig, profileUrl: string): Promise<void> {
+async function applyExtraHeaders(context: BrowserContext, cfg: BrowserConfig, profileUrl: string): Promise<void> {
   const extra = cfg.extraHeaders;
   if (extra === undefined || Object.keys(extra).length === 0) return;
   const names = Object.keys(extra).map((name) => name.toLowerCase());
@@ -222,14 +230,11 @@ async function restrictExtraHeaders(context: BrowserContext, cfg: BrowserConfig,
     } catch {
       allowed = false;
     }
-    if (allowed) {
-      void route.continue();
-      return;
-    }
     const headers = { ...route.request().headers() };
     for (const key of Object.keys(headers)) {
       if (names.includes(key.toLowerCase())) delete headers[key];
     }
+    if (allowed) Object.assign(headers, extra);
     void route.continue({ headers });
   });
 }

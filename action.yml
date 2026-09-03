@@ -1,12 +1,33 @@
 # Composite GitHub Action for Scriptlock.
-# Installs Node and scriptlock, installs Chromium with the CLI's bundled playwright-core,
-# runs `scriptlock diff`, writes the
-# markdown report to the job summary and the text report to the log, uploads .scriptlock/
+#
+# What it does: validates its inputs, installs Node and scriptlock, installs Chromium with
+# the CLI's bundled playwright-core, runs `scriptlock diff` ONCE (the diff performs the
+# scan), writes the markdown report to the job summary and the log, uploads `.scriptlock/`
 # as a run artifact (unless `artifact: "false"`) and exits with Scriptlock's own exit code
-# (0 clean, 1 findings, 2 run error).
-# Known limitations: a Linux runner with apt is assumed for `--with-deps`; the scan runs
-# once and both reports are rendered from that single snapshot; on a public repository the
-# uploaded artifact is downloadable by anyone and GitHub clamps its retention to 90 days.
+# (0 clean, 1 findings or no manifest yet, 2 run error).
+#
+# The diff owns the scan deliberately: `scriptlock diff` writes a clean scan to
+# `.scriptlock/last.<profile>.json` and a bot-challenge scan to
+# `.scriptlock/blocked.<profile>.json`, so a challenge page cannot overwrite the last good
+# snapshot. A separate `scriptlock scan` step ahead of the diff would lose that guard, and
+# would scan the page twice.
+#
+# What it publishes, and where: the markdown report names the scanned URL, every script URL
+# on the page and, on a header event, the full `content-security-policy`. It goes to THREE
+# places: the run artifact (`artifact`), the job summary and the job log (`summary`). On a
+# public repository the job summary and the log are readable with no GitHub account at all,
+# and the artifact by any signed-in GitHub user. `artifact: "false"` suppresses only the
+# first; use `summary: "false"` as well to keep the gate red without publishing the page map.
+#
+# No input of this action may carry a secret. The runner echoes each composite step's whole
+# `env:` block into the job log, and inputs are passed through it. Authentication for the
+# scan goes through `browser.extraHeaders` / `browser.storageState` in
+# scriptlock.config.yaml, fed from `secrets.*` in the caller's own `env:` block.
+#
+# Known limitations: a Linux runner with apt is assumed for `--with-deps`; the manifest and
+# `.scriptlock/` are resolved against `working-directory`, not against the file named by
+# `config`; GitHub clamps artifact retention to the repository maximum (90 days on public
+# repositories and the Free plan) and only warns.
 name: Scriptlock
 description: Script inventory and change detection for web pages. Runs scriptlock diff and publishes the report.
 author: Vladimir Nizovtsev
@@ -17,7 +38,9 @@ branding:
 
 inputs:
   profile:
-    description: Profile name from scriptlock.config.yaml.
+    description: >-
+      Profile name from scriptlock.config.yaml. It becomes part of a file name, so it must
+      start with a letter or digit and contain only letters, digits, ".", "_" and "-".
     required: false
     default: default
   mode:
@@ -25,7 +48,11 @@ inputs:
     required: false
     default: gate
   config:
-    description: Path to scriptlock.config.yaml, relative to working-directory. Empty means the default lookup.
+    description: >-
+      Path to scriptlock.config.yaml, relative to working-directory. Empty means the default
+      lookup. The manifest and `.scriptlock/` are resolved against working-directory, not
+      against this file, so a configuration in a subdirectory needs working-directory set to
+      that subdirectory as well.
     required: false
     default: ""
   node-version:
@@ -33,25 +60,49 @@ inputs:
     required: false
     default: "22"
   version:
-    description: scriptlock version to install from npm.
+    description: >-
+      scriptlock version to install from npm. Pinned by default so two scheduled runs are
+      produced by the same code; "latest" is accepted but is not reproducible, and the value
+      is an npm spec, so a git URL or a tarball URL here installs arbitrary code.
     required: false
-    default: latest
+    default: "0.2.0"
   history:
-    description: Also write the snapshot and diff under .scriptlock/history/<profile>/ (true or false).
+    description: >-
+      Also write the snapshot and diff under .scriptlock/history/<profile>/ (true or false).
+      This input is authoritative: "false" suppresses history even when the profile sets
+      `history: true` in scriptlock.config.yaml.
     required: false
     default: "false"
   working-directory:
-    description: Directory containing scriptlock.config.yaml and the manifest.
+    description: Directory containing scriptlock.config.yaml, the manifest and `.scriptlock/`.
     required: false
     default: "."
-  artifact:
+  summary:
     description: >-
-      Upload .scriptlock/ as a run artifact (true or false). The snapshot lists every script URL
-      on the scanned page, including query strings, plus the final URL and the full
-      content-security-policy. On a public repository a run artifact is downloadable by anyone,
-      so set this to false when the scanned page must not be described publicly.
+      Write the full markdown report to the job summary and the job log (true or false).
+      "false" publishes only the counts and the exit code there, for a payment page whose
+      script URLs and content-security-policy must not appear on a public run page; the
+      report is still written to `.scriptlock/` and uploaded when `artifact` is true.
     required: false
     default: "true"
+  artifact:
+    description: >-
+      Upload .scriptlock/ as a run artifact (true or false). The snapshot lists every script
+      URL on the scanned page, including query strings, plus the final URL and the full
+      content-security-policy. On a public repository the artifact is downloadable by any
+      signed-in GitHub user with no relationship to the repository, and its name, size and
+      digest are readable with no account at all. Set this to false when the scanned page
+      must not be described publicly, and see `summary` for the job summary and the log.
+    required: false
+    default: "true"
+  artifact-name:
+    description: >-
+      Name of the uploaded artifact. Empty means `scriptlock-<profile>-<job id>`, which is
+      NOT unique across a matrix that varies anything other than the profile: two legs would
+      collide and the second upload would fail with a conflict. Set this to a name that
+      includes the matrix values in that case.
+    required: false
+    default: ""
   retention-days:
     description: >-
       Retention of the uploaded artifact in days. GitHub clamps this to the repository maximum
@@ -62,17 +113,81 @@ inputs:
 
 outputs:
   exit-code:
-    description: Exit code of scriptlock diff. 0 clean, 1 findings at fail severity, 2 run error (blocked, navigation failure, invalid configuration).
-    value: ${{ steps.diff-md.outputs.exit-code }}
+    description: >-
+      Exit code of scriptlock diff: 0 clean, 1 findings at fail severity or no manifest yet,
+      2 run error (a blocked scan, a navigation failure, an invalid configuration). 2 is also
+      reported when the run failed before the diff, so this output is always 0, 1 or 2.
+    value: ${{ steps.result.outputs.exit-code }}
   summary-file:
-    description: Absolute path of the markdown report written by scriptlock diff --format md.
-    value: ${{ steps.diff-md.outputs.summary-file }}
+    description: >-
+      Absolute path of the markdown report written by scriptlock diff --format md. Empty when
+      no report was written — most commonly when no manifest exists yet, or when the run
+      failed before the diff — so a consumer must handle both the empty value and a missing
+      file. See report-written.
+    value: ${{ steps.result.outputs.summary-file }}
+  report-written:
+    description: '"true" when the markdown report exists at summary-file, "false" otherwise.'
+    value: ${{ steps.result.outputs.report-written }}
 
 runs:
   using: composite
   steps:
+    # First, so a typo fails in seconds rather than after two installs, and so the
+    # values interpolated into a shell working directory and into upload-artifact's
+    # newline-separated path patterns are known to be single-line.
+    - name: Validate inputs
+      shell: bash
+      env:
+        SCRIPTLOCK_PROFILE: ${{ inputs.profile }}
+        SCRIPTLOCK_MODE: ${{ inputs.mode }}
+        SCRIPTLOCK_CONFIG: ${{ inputs.config }}
+        SCRIPTLOCK_HISTORY: ${{ inputs.history }}
+        SCRIPTLOCK_WORKDIR: ${{ inputs.working-directory }}
+        SCRIPTLOCK_SUMMARY: ${{ inputs.summary }}
+        SCRIPTLOCK_ARTIFACT: ${{ inputs.artifact }}
+        SCRIPTLOCK_ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        SCRIPTLOCK_RETENTION: ${{ inputs.retention-days }}
+      run: |
+        fail() { echo "error: $1" >&2; exit 2; }
+        single_line() {
+          case "$2" in
+            *[$'\n\r']*) fail "$1 must be a single line" ;;
+          esac
+        }
+        boolean() {
+          case "$2" in
+            true|false) ;;
+            *) fail "$1 must be true or false, got '$2'" ;;
+          esac
+        }
+        single_line "profile" "$SCRIPTLOCK_PROFILE"
+        single_line "config" "$SCRIPTLOCK_CONFIG"
+        single_line "working-directory" "$SCRIPTLOCK_WORKDIR"
+        single_line "artifact-name" "$SCRIPTLOCK_ARTIFACT_NAME"
+        case "$SCRIPTLOCK_MODE" in
+          gate|drift) ;;
+          *) fail "mode must be gate or drift, got '$SCRIPTLOCK_MODE'" ;;
+        esac
+        boolean "history" "$SCRIPTLOCK_HISTORY"
+        boolean "summary" "$SCRIPTLOCK_SUMMARY"
+        boolean "artifact" "$SCRIPTLOCK_ARTIFACT"
+        # A profile name becomes a file name (.scriptlock/last.<profile>.json and the
+        # history directory), and this is the rule the configuration schema applies.
+        case "$SCRIPTLOCK_PROFILE" in
+          [A-Za-z0-9]*) ;;
+          *) fail "profile must start with a letter or digit, got '$SCRIPTLOCK_PROFILE'" ;;
+        esac
+        case "$SCRIPTLOCK_PROFILE" in
+          *[!A-Za-z0-9._-]*) fail "profile may contain only letters, digits, '.', '_' and '-', got '$SCRIPTLOCK_PROFILE'" ;;
+        esac
+        case "$SCRIPTLOCK_RETENTION" in
+          ''|*[!0-9]*) fail "retention-days must be a whole number of days, got '$SCRIPTLOCK_RETENTION'" ;;
+        esac
+
     - name: Set up Node.js
-      uses: actions/setup-node@v7
+      # Pinned to a full commit SHA: a consumer who pins this action by SHA still executes
+      # whatever a mutable major tag points at today, so the pin would buy nothing.
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version: ${{ inputs.node-version }}
 
@@ -80,7 +195,13 @@ runs:
       shell: bash
       env:
         SCRIPTLOCK_VERSION: ${{ inputs.version }}
-      run: npm install -g "scriptlock@$SCRIPTLOCK_VERSION"
+      # --ignore-scripts: nothing in this dependency tree needs a lifecycle script
+      # (playwright-core downloads no browser, which is why the next step installs
+      # Chromium explicitly), and the install runs in a job that may hold secrets.
+      run: |
+        npm install -g --ignore-scripts "scriptlock@$SCRIPTLOCK_VERSION"
+        # Records in the log which version produced the evidence below.
+        scriptlock --version
 
     - name: Install Chromium
       shell: bash
@@ -88,87 +209,116 @@ runs:
       # so the browser revision is exactly the one the CLI looks for.
       run: node "$(npm root -g)/scriptlock/node_modules/playwright-core/cli.js" install --with-deps chromium
 
-    - name: Validate inputs
-      shell: bash
-      env:
-        SCRIPTLOCK_MODE: ${{ inputs.mode }}
-        SCRIPTLOCK_HISTORY: ${{ inputs.history }}
-        SCRIPTLOCK_ARTIFACT: ${{ inputs.artifact }}
-      run: |
-        case "$SCRIPTLOCK_MODE" in
-          gate|drift) ;;
-          *) echo "error: mode must be gate or drift, got '$SCRIPTLOCK_MODE'" >&2; exit 2 ;;
-        esac
-        case "$SCRIPTLOCK_HISTORY" in
-          true|false) ;;
-          *) echo "error: history must be true or false, got '$SCRIPTLOCK_HISTORY'" >&2; exit 2 ;;
-        esac
-        case "$SCRIPTLOCK_ARTIFACT" in
-          true|false) ;;
-          *) echo "error: artifact must be true or false, got '$SCRIPTLOCK_ARTIFACT'" >&2; exit 2 ;;
-        esac
-
-    - name: Scan
+    - name: Scan and diff
+      id: diff
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
         SCRIPTLOCK_PROFILE: ${{ inputs.profile }}
         SCRIPTLOCK_CONFIG: ${{ inputs.config }}
+        SCRIPTLOCK_MODE: ${{ inputs.mode }}
+        SCRIPTLOCK_HISTORY: ${{ inputs.history }}
+        SCRIPTLOCK_SUMMARY: ${{ inputs.summary }}
       run: |
         mkdir -p .scriptlock
-        args=(scan --profile "$SCRIPTLOCK_PROFILE" --out ".scriptlock/last.$SCRIPTLOCK_PROFILE.json")
+        report="$PWD/.scriptlock/diff.$SCRIPTLOCK_PROFILE.md"
+        rm -f "$report"
+        args=(diff --profile "$SCRIPTLOCK_PROFILE" "--$SCRIPTLOCK_MODE" --format md --out "$report")
         if [ -n "$SCRIPTLOCK_CONFIG" ]; then args+=(--config "$SCRIPTLOCK_CONFIG"); fi
-        scriptlock "${args[@]}"
+        # Explicit either way: --no-history overrides `history: true` in the profile, so
+        # this input decides, and one run leaves exactly one line in the history index.
+        if [ "$SCRIPTLOCK_HISTORY" = "true" ]; then args+=(--history); else args+=(--no-history); fi
 
-    - name: Diff (markdown to job summary)
-      id: diff-md
-      shell: bash
-      working-directory: ${{ inputs.working-directory }}
-      env:
-        SCRIPTLOCK_PROFILE: ${{ inputs.profile }}
-        SCRIPTLOCK_CONFIG: ${{ inputs.config }}
-        SCRIPTLOCK_MODE: ${{ inputs.mode }}
-      run: |
-        summary="$PWD/.scriptlock/diff.$SCRIPTLOCK_PROFILE.md"
-        args=(diff --profile "$SCRIPTLOCK_PROFILE" "--$SCRIPTLOCK_MODE" --snapshot ".scriptlock/last.$SCRIPTLOCK_PROFILE.json" --format md --out "$summary")
-        if [ -n "$SCRIPTLOCK_CONFIG" ]; then args+=(--config "$SCRIPTLOCK_CONFIG"); fi
+        tmp="${RUNNER_TEMP:-/tmp}"
         set +e
-        scriptlock "${args[@]}"
+        scriptlock "${args[@]}" >"$tmp/scriptlock.out" 2>"$tmp/scriptlock.err"
         code=$?
         set -e
+        # Captured rather than streamed so the stderr can also be put in the job summary
+        # on the path where the diff writes no report at all.
+        cat "$tmp/scriptlock.out"
+        cat "$tmp/scriptlock.err" >&2
+
         echo "exit-code=$code" >> "$GITHUB_OUTPUT"
-        echo "summary-file=$summary" >> "$GITHUB_OUTPUT"
-        if [ -f "$summary" ]; then
-          cat "$summary" >> "$GITHUB_STEP_SUMMARY"
+        if [ -f "$report" ]; then
+          echo "report-written=true" >> "$GITHUB_OUTPUT"
+          echo "summary-file=$report" >> "$GITHUB_OUTPUT"
         else
-          echo "scriptlock diff exited with code $code before writing a report." >> "$GITHUB_STEP_SUMMARY"
-          exit "$code"
+          echo "report-written=false" >> "$GITHUB_OUTPUT"
+          echo "summary-file=" >> "$GITHUB_OUTPUT"
         fi
 
-    - name: Diff (text to log)
+        {
+          if [ ! -f "$report" ]; then
+            # The diff stopped before rendering a report; the most common cause is a
+            # first run with no manifest yet. The instructions are on its stderr, so
+            # they go here rather than nowhere.
+            echo "### Scriptlock ($SCRIPTLOCK_PROFILE)"
+            echo
+            echo "\`scriptlock diff\` exited with code $code before writing a report."
+            echo
+            echo '```'
+            cat "$tmp/scriptlock.err"
+            echo '```'
+          elif [ "$SCRIPTLOCK_SUMMARY" = "true" ]; then
+            cat "$report"
+          else
+            echo "### Scriptlock ($SCRIPTLOCK_PROFILE)"
+            echo
+            echo "\`summary: \"false\"\`, so the report is not published here. It is at \`.scriptlock/diff.$SCRIPTLOCK_PROFILE.md\` in the workspace."
+            echo
+            echo '```'
+            cat "$tmp/scriptlock.out"
+            echo '```'
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        if [ -f "$report" ] && [ "$SCRIPTLOCK_SUMMARY" = "true" ]; then cat "$report"; fi
+        # The exit code of this step is the exit code of the action. It is not swallowed.
+        exit "$code"
+
+    # Runs even when the diff failed or never ran, so the documented output contract
+    # holds on every path instead of quietly degrading to the empty string.
+    - name: Publish outputs
+      id: result
+      if: always()
       shell: bash
-      working-directory: ${{ inputs.working-directory }}
       env:
-        SCRIPTLOCK_PROFILE: ${{ inputs.profile }}
-        SCRIPTLOCK_CONFIG: ${{ inputs.config }}
-        SCRIPTLOCK_MODE: ${{ inputs.mode }}
-        SCRIPTLOCK_HISTORY: ${{ inputs.history }}
+        DIFF_OUTCOME: ${{ steps.diff.outcome }}
+        DIFF_EXIT: ${{ steps.diff.outputs.exit-code }}
+        DIFF_REPORT: ${{ steps.diff.outputs.summary-file }}
+        DIFF_WRITTEN: ${{ steps.diff.outputs.report-written }}
       run: |
-        args=(diff --profile "$SCRIPTLOCK_PROFILE" "--$SCRIPTLOCK_MODE" --snapshot ".scriptlock/last.$SCRIPTLOCK_PROFILE.json" --format text)
-        if [ -n "$SCRIPTLOCK_CONFIG" ]; then args+=(--config "$SCRIPTLOCK_CONFIG"); fi
-        if [ "$SCRIPTLOCK_HISTORY" = "true" ]; then args+=(--history); fi
-        # The exit code of this command is the exit code of the action. It is not swallowed.
-        scriptlock "${args[@]}"
+        code="$DIFF_EXIT"
+        written="$DIFF_WRITTEN"
+        if [ -z "$code" ]; then
+          # The diff never ran: an invalid input, the Node setup, the npm install or the
+          # browser install failed. Every one of those is a run error.
+          echo "scriptlock: the diff step did not run (outcome: $DIFF_OUTCOME); reporting exit-code 2" >&2
+          code=2
+          written=false
+        fi
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        echo "report-written=${written:-false}" >> "$GITHUB_OUTPUT"
+        if [ "$written" = "true" ]; then
+          echo "summary-file=$DIFF_REPORT" >> "$GITHUB_OUTPUT"
+        else
+          echo "summary-file=" >> "$GITHUB_OUTPUT"
+        fi
 
     - name: Upload .scriptlock as a run artifact
-      if: always() && inputs.artifact == 'true'
-      uses: actions/upload-artifact@v7
+      # Only when the diff actually ran: an upload after a failed install would find
+      # nothing and add a second, misleading error to an already-red job.
+      if: always() && inputs.artifact == 'true' && (steps.diff.outcome == 'success' || steps.diff.outcome == 'failure')
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
-        name: scriptlock-${{ inputs.profile }}-${{ github.job }}
+        name: ${{ inputs.artifact-name != '' && inputs.artifact-name || format('scriptlock-{0}-{1}', inputs.profile, github.job) }}
         path: ${{ inputs.working-directory }}/.scriptlock
         # .scriptlock starts with a dot, and upload-artifact has skipped hidden
         # files by default since v4.4. Without this the evidence trail this
         # action exists to produce is silently never uploaded.
         include-hidden-files: true
-        if-no-files-found: warn
+        # error, not the default warn: an upload that finds nothing is how the
+        # missing include-hidden-files shipped in 0.1.0 stayed invisible.
+        if-no-files-found: error
         retention-days: ${{ inputs.retention-days }}
