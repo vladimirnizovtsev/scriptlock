@@ -4,7 +4,9 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- The GitHub Action uploaded no run artifact. `actions/upload-artifact` has skipped hidden files by default since v4.4, and the uploaded path `.scriptlock` starts with a dot, so every run logged "No files were found with the provided path" and the snapshot and diff history that the action exists to preserve were silently discarded. Found by running the action against the demo storefront.
 
 ## [0.1.0] - 2026-09-03
 

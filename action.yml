@@ -166,5 +166,9 @@ runs:
       with:
         name: scriptlock-${{ inputs.profile }}-${{ github.job }}
         path: ${{ inputs.working-directory }}/.scriptlock
+        # .scriptlock starts with a dot, and upload-artifact has skipped hidden
+        # files by default since v4.4. Without this the evidence trail this
+        # action exists to produce is silently never uploaded.
+        include-hidden-files: true
         if-no-files-found: warn
         retention-days: ${{ inputs.retention-days }}
