@@ -1,5 +1,5 @@
 /**
- * Zod v4 schema for tessera.lock.yaml.
+ * Zod v4 schema for scriptlock.lock.yaml.
  *
  * Owns: `manifestSchema`, `toManifest()` (converts the zod output into the
  * `Manifest` contract type without undefined-valued optional keys),

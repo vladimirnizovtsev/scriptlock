@@ -68,7 +68,7 @@ function eventRow(event: DiffEvent): string[] {
 export function renderMarkdown(result: DiffResult): string {
   const lines: string[] = [];
   const { fail, warn, info, totalScripts, merchantScripts, approved } = result.summary;
-  lines.push(`## Tessera diff: ${result.profile} (${result.mode})`);
+  lines.push(`## Scriptlock diff: ${result.profile} (${result.mode})`);
   lines.push('');
   lines.push(`URL: ${result.url}  `);
   lines.push(`Scanned: ${result.scannedAt}  `);
@@ -151,7 +151,7 @@ export function renderInventoryMarkdown(snapshot: Snapshot, manifest: Manifest):
   const counts = { approved: 0, unapproved: 0, stale: 0 };
   for (const row of rows) counts[row.status] += 1;
 
-  lines.push(`## Tessera inventory: ${snapshot.profile}`);
+  lines.push(`## Scriptlock inventory: ${snapshot.profile}`);
   lines.push('');
   lines.push(`URL: ${snapshot.url}  `);
   lines.push(`Scanned: ${snapshot.finishedAt} (${snapshot.runs} run${snapshot.runs === 1 ? '' : 's'})  `);

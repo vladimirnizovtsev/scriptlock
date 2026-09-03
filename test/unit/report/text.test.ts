@@ -25,7 +25,7 @@ function sample() {
 describe('renderText', () => {
   it('prints a header, grouped events and a summary with the exit code meaning', () => {
     const text = renderText(sample(), { color: false });
-    expect(text).toContain('tessera diff (gate) https://shop.example.com/checkout');
+    expect(text).toContain('scriptlock diff (gate) https://shop.example.com/checkout');
     expect(text).toContain('profile: default');
     expect(text).toContain('FAIL (1)');
     expect(text).toContain('WARN (1)');

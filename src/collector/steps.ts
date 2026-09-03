@@ -18,7 +18,7 @@
 import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { Page } from 'playwright-core';
-import { TesseraError } from '../errors.js';
+import { ScriptlockError } from '../errors.js';
 import type { FlowStep, WaitUntil } from '../types.js';
 
 export interface StepContext {
@@ -41,8 +41,8 @@ export function stepLabel(step: FlowStep): string {
   return `${key}: ${typeof value === 'object' ? JSON.stringify(value) : String(value)}`;
 }
 
-function fail(message: string, cause?: unknown): TesseraError {
-  return new TesseraError('STEP_FAILED', message, { exitCode: 2, cause });
+function fail(message: string, cause?: unknown): ScriptlockError {
+  return new ScriptlockError('STEP_FAILED', message, { exitCode: 2, cause });
 }
 
 export async function runSteps(page: Page, steps: FlowStep[] | string | undefined, ctx: StepContext): Promise<void> {
@@ -66,7 +66,7 @@ export async function runSteps(page: Page, steps: FlowStep[] | string | undefine
     try {
       await runStep(page, step, ctx);
     } catch (error) {
-      if (error instanceof TesseraError) throw error;
+      if (error instanceof ScriptlockError) throw error;
       throw fail(`step ${index + 1} (${stepLabel(step)}) failed: ${errorMessage(error)}`, error);
     }
   }
@@ -130,7 +130,7 @@ export async function loadFlowModule(modulePath: string, cwd: string): Promise<F
       throw fail(`could not load flow module ${modulePath}: ${errorMessage(error)}`, error);
     }
   } else {
-    throw new TesseraError('UNSUPPORTED', `flow module ${modulePath} must be a .js, .mjs or .ts file`, { exitCode: 2 });
+    throw new ScriptlockError('UNSUPPORTED', `flow module ${modulePath} must be a .js, .mjs or .ts file`, { exitCode: 2 });
   }
   let flow = (loaded as { default?: unknown }).default;
   // CommonJS interop: a .ts file outside an ESM package compiles to module.exports.default.
@@ -154,7 +154,7 @@ async function importWithTsx(href: string, modulePath: string): Promise<unknown>
     const specifier = 'tsx/esm/api';
     api = (await import(specifier)) as TsxApi;
   } catch (error) {
-    throw new TesseraError('UNSUPPORTED', `flow module ${modulePath} is TypeScript but tsx is not installed`, {
+    throw new ScriptlockError('UNSUPPORTED', `flow module ${modulePath} is TypeScript but tsx is not installed`, {
       exitCode: 2,
       hint: 'npm install --save-dev tsx',
       cause: error,

@@ -1,6 +1,6 @@
 /**
- * `tessera scan` (DESIGN.md section 8): run one profile through the collector,
- * write the snapshot to `.tessera/last.<profile>.json` (or `--out`) and print
+ * `scriptlock scan` (DESIGN.md section 8): run one profile through the collector,
+ * write the snapshot to `.scriptlock/last.<profile>.json` (or `--out`) and print
  * a summary (scripts by scope and kind, third-party hosts, initiator tree
  * depth, security headers present) or the snapshot JSON with `--json`.
  *
@@ -20,7 +20,7 @@ import pc from 'picocolors';
 import { z } from 'zod';
 import { scan } from '../collector/collect.js';
 import { loadConfig } from '../config/load.js';
-import { TesseraError } from '../errors.js';
+import { ScriptlockError } from '../errors.js';
 import { snapshotToJson } from '../history/store.js';
 import { isFirstParty } from '../identity/identity.js';
 import {
@@ -31,7 +31,7 @@ import {
   type Scope,
   type ScriptKind,
   type Snapshot,
-  type TesseraConfig,
+  type ScriptlockConfig,
 } from '../types.js';
 
 // ---------------------------------------------------------------------------
@@ -39,7 +39,7 @@ import {
 // ---------------------------------------------------------------------------
 
 export interface CommandContext {
-  /** Directory the configuration, manifest and `.tessera/` are resolved against. */
+  /** Directory the configuration, manifest and `.scriptlock/` are resolved against. */
   cwd: string;
   /** `--config <path>` (relative to cwd); undefined means the default lookup. */
   configPath?: string | undefined;
@@ -57,19 +57,19 @@ export interface CommandContext {
 }
 
 export interface LoadedProfile {
-  config: TesseraConfig;
+  config: ScriptlockConfig;
   configPath: string;
   name: string;
   profile: ProfileConfig;
 }
 
-export function requireProfile(config: TesseraConfig, name: string): ProfileConfig {
+export function requireProfile(config: ScriptlockConfig, name: string): ProfileConfig {
   const profile = config.profiles[name];
   if (profile === undefined) {
     const known = Object.keys(config.profiles).join(', ') || '(none)';
-    throw new TesseraError('PROFILE_NOT_FOUND', `profile "${name}" is not defined in the configuration; known profiles: ${known}`, {
+    throw new ScriptlockError('PROFILE_NOT_FOUND', `profile "${name}" is not defined in the configuration; known profiles: ${known}`, {
       exitCode: 2,
-      hint: 'Pass --profile <name> with one of the profiles listed above, or add the profile to tessera.config.yaml',
+      hint: 'Pass --profile <name> with one of the profiles listed above, or add the profile to scriptlock.config.yaml',
     });
   }
   return profile;
@@ -89,9 +89,9 @@ export function plural(count: number, word: string, pluralWord: string = `${word
 // Snapshot files
 // ---------------------------------------------------------------------------
 
-/** `.tessera/last.<profile>.json` under `cwd`. */
+/** `.scriptlock/last.<profile>.json` under `cwd`. */
 export function lastSnapshotPath(cwd: string, profile: string): string {
-  return path.join(cwd, '.tessera', `last.${profile}.json`);
+  return path.join(cwd, '.scriptlock', `last.${profile}.json`);
 }
 
 const scopeSchema = z.enum(['merchant', 'tpsp', 'threeds', 'embedded', 'harness']);
@@ -125,7 +125,7 @@ const scriptSchema = z.looseObject({
 /** Structural schema of a snapshot file; unknown keys are kept. */
 export const snapshotSchema = z.looseObject({
   version: z.literal(1),
-  tool: z.looseObject({ name: z.literal('tessera'), version: z.string() }),
+  tool: z.looseObject({ name: z.literal('scriptlock'), version: z.string() }),
   profile: z.string().min(1),
   url: z.string(),
   finalUrl: z.string(),
@@ -154,15 +154,15 @@ export function parseSnapshot(text: string, where: string = 'snapshot'): Snapsho
     raw = JSON.parse(text);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    throw new TesseraError('SNAPSHOT_INVALID', `Invalid JSON in ${where}: ${detail}`, {
-      hint: 'Run "tessera scan" to write a fresh snapshot',
+    throw new ScriptlockError('SNAPSHOT_INVALID', `Invalid JSON in ${where}: ${detail}`, {
+      hint: 'Run "scriptlock scan" to write a fresh snapshot',
       cause: error,
     });
   }
   const result = snapshotSchema.safeParse(raw);
   if (!result.success) {
-    throw new TesseraError('SNAPSHOT_INVALID', `Invalid snapshot ${where}:\n${formatIssues(result.error.issues)}`, {
-      hint: 'Run "tessera scan" to write a fresh snapshot',
+    throw new ScriptlockError('SNAPSHOT_INVALID', `Invalid snapshot ${where}:\n${formatIssues(result.error.issues)}`, {
+      hint: 'Run "scriptlock scan" to write a fresh snapshot',
     });
   }
   return snapshotToJson(raw as Snapshot);
@@ -175,9 +175,9 @@ export async function readSnapshot(file: string): Promise<Snapshot> {
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ENOENT' || code === 'ENOTDIR') {
-      throw new TesseraError('SNAPSHOT_NOT_FOUND', `Snapshot not found: ${file}`, {
+      throw new ScriptlockError('SNAPSHOT_NOT_FOUND', `Snapshot not found: ${file}`, {
         exitCode: 2,
-        hint: 'Run "tessera scan" first, or pass --snapshot <file>',
+        hint: 'Run "scriptlock scan" first, or pass --snapshot <file>',
         cause: error,
       });
     }
@@ -200,7 +200,7 @@ export interface ScanCommandOptions {
   profile: string;
   /** Overrides `profile.runs`. */
   runs?: number | undefined;
-  /** Snapshot output path, relative to cwd; defaults to `.tessera/last.<profile>.json`. */
+  /** Snapshot output path, relative to cwd; defaults to `.scriptlock/last.<profile>.json`. */
   out?: string | undefined;
   /** Print the snapshot JSON instead of the summary. */
   json?: boolean | undefined;
@@ -298,7 +298,7 @@ export function renderScanSummary(snapshot: Snapshot, file: string, opts: { colo
   const scripts = snapshot.scripts.filter((s) => s.scope !== 'harness');
   const lines: string[] = [];
 
-  lines.push(`${c.bold('tessera scan')} ${snapshot.profile} ${snapshot.url}`);
+  lines.push(`${c.bold('scriptlock scan')} ${snapshot.profile} ${snapshot.url}`);
   lines.push(
     c.dim(
       `status ${snapshot.documentStatus}, ${plural(snapshot.runs, 'run')}, ${snapshot.vantage.browser}, finished ${snapshot.finishedAt}`,

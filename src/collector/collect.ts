@@ -20,7 +20,7 @@
  */
 import { hostname } from 'node:os';
 import type { BrowserContext, BrowserContextOptions, Page } from 'playwright-core';
-import { TesseraError } from '../errors.js';
+import { ScriptlockError } from '../errors.js';
 import { lookupEntity } from '../identity/entity.js';
 import { sha256, sha256Bytes } from '../identity/hash.js';
 import { deriveId } from '../identity/identity.js';
@@ -38,7 +38,7 @@ import type {
   ScriptKind,
   SecurityHeaders,
   Snapshot,
-  TesseraConfig,
+  ScriptlockConfig,
   Vantage,
 } from '../types.js';
 import { detectBlocked, extractTitle } from './blocked.js';
@@ -63,7 +63,7 @@ export async function scan(options: ScanOptions): Promise<Snapshot> {
   const profile = config.profiles[options.profile];
   if (profile === undefined) {
     const known = Object.keys(config.profiles).join(', ') || '(none)';
-    throw new TesseraError('PROFILE_NOT_FOUND', `profile "${options.profile}" is not defined; known profiles: ${known}`, {
+    throw new ScriptlockError('PROFILE_NOT_FOUND', `profile "${options.profile}" is not defined; known profiles: ${known}`, {
       exitCode: 2,
     });
   }
@@ -83,7 +83,7 @@ export async function scan(options: ScanOptions): Promise<Snapshot> {
   }
 
   const first = results[0];
-  if (first === undefined) throw new TesseraError('NAVIGATION_FAILED', 'no run completed', { exitCode: 2 });
+  if (first === undefined) throw new ScriptlockError('NAVIGATION_FAILED', 'no run completed', { exitCode: 2 });
 
   const scripts = new Map<string, ObservedScript>();
   const frames = new Map<string, FrameInfo>();
@@ -116,7 +116,7 @@ export async function scan(options: ScanOptions): Promise<Snapshot> {
 
   const snapshot: Snapshot = {
     version: 1,
-    tool: { name: 'tessera', version: options.toolVersion },
+    tool: { name: 'scriptlock', version: options.toolVersion },
     profile: options.profile,
     url: profile.url,
     finalUrl: first.finalUrl,
@@ -136,7 +136,7 @@ export async function scan(options: ScanOptions): Promise<Snapshot> {
 
 async function runOnce(
   launched: LaunchedBrowser,
-  config: TesseraConfig,
+  config: ScriptlockConfig,
   profile: ProfileConfig,
   run: number,
   runs: number,
@@ -166,7 +166,7 @@ async function runOnce(
       await page.goto(profile.url, { waitUntil: profile.wait, timeout: browserCfg.timeoutMs });
     } catch (error) {
       const message = error instanceof Error ? error.message.split('\n')[0] ?? error.message : String(error);
-      throw new TesseraError('NAVIGATION_FAILED', `navigation to ${profile.url} failed: ${message}`, { exitCode: 2, cause: error });
+      throw new ScriptlockError('NAVIGATION_FAILED', `navigation to ${profile.url} failed: ${message}`, { exitCode: 2, cause: error });
     }
 
     await runSteps(page, profile.steps, {
@@ -263,7 +263,7 @@ function formatStack(stack: RawStackFrame[]): string[] {
   return stack.map((frame) => `${frame.url}:${frame.line + 1}:${frame.column + 1}`);
 }
 
-function buildRun(capture: Capture, config: TesseraConfig, finalUrl: string, html: string, vantage: Vantage): RunResult {
+function buildRun(capture: Capture, config: ScriptlockConfig, finalUrl: string, html: string, vantage: Vantage): RunResult {
   const warnings = [...capture.warnings];
   const mainFrameId = capture.mainFrameId;
   const mainOrigin = originOf(finalUrl);

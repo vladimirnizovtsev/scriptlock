@@ -7,12 +7,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { scan } from '../../src/collector/collect.js';
-import type { ObservedScript, Snapshot, TesseraConfig } from '../../src/types.js';
+import type { ObservedScript, Snapshot, ScriptlockConfig } from '../../src/types.js';
 import { start, type FixtureServer } from '../../fixtures/server.js';
 
 let server: FixtureServer;
 
-function makeConfig(url: string, overrides: Partial<TesseraConfig> = {}): TesseraConfig {
+function makeConfig(url: string, overrides: Partial<ScriptlockConfig> = {}): ScriptlockConfig {
   return {
     version: 1,
     browser: {
@@ -56,7 +56,7 @@ describe('collector', () => {
 
   it('records snapshot metadata and vantage', () => {
     expect(snapshot.version).toBe(1);
-    expect(snapshot.tool).toEqual({ name: 'tessera', version: '0.0.0-test' });
+    expect(snapshot.tool).toEqual({ name: 'scriptlock', version: '0.0.0-test' });
     expect(snapshot.profile).toBe('default');
     expect(snapshot.url).toBe(`${server.origin}/`);
     expect(snapshot.finalUrl).toBe(`${server.origin}/`);
@@ -392,7 +392,7 @@ describe('collector steps DSL', () => {
 });
 
 describe('collector flow modules', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'tessera-flow-'));
+  const dir = mkdtempSync(join(tmpdir(), 'scriptlock-flow-'));
 
   it('runs a .mjs flow module exporting a default function', async () => {
     const modulePath = join(dir, 'flow.mjs');

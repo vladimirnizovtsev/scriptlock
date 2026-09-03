@@ -49,7 +49,7 @@ function structuralId(kind: ScriptKind, frameOrigin: string, source: string): st
   return `${kind}:${frameOrigin}:${structuralHash(source).slice(0, 16)}`;
 }
 
-/** Derive the stable Tessera identity of an observed script. */
+/** Derive the stable Scriptlock identity of an observed script. */
 export function deriveId(input: DeriveIdInput, cfg: IdentityConfig): string {
   const { kind, frameOrigin, source } = input;
   switch (kind) {

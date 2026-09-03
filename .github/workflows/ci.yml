@@ -1,4 +1,4 @@
-# CI for the Tessera repository itself: typecheck, unit and e2e tests, build.
+# CI for the Scriptlock repository itself: typecheck, unit and e2e tests, build.
 name: CI
 
 on:

@@ -1,5 +1,5 @@
 /**
- * `tessera approve` (DESIGN.md section 8): turn observed scripts and frames
+ * `scriptlock approve` (DESIGN.md section 8): turn observed scripts and frames
  * from the last snapshot (or `--snapshot`) into manifest entries, re-approve
  * existing entries with their current hashes, refresh tracked hashes with
  * `--refresh`, and record the observed security headers with `--headers`.
@@ -16,7 +16,7 @@
 import { spawnSync, type SpawnSyncOptionsWithStringEncoding } from 'node:child_process';
 import path from 'node:path';
 import { manifestPathFor } from '../config/load.js';
-import { isTesseraError, TesseraError } from '../errors.js';
+import { isScriptlockError, ScriptlockError } from '../errors.js';
 import {
   ALL_NEW,
   approveFrames,
@@ -77,7 +77,7 @@ export interface ApproveCommandOptions {
   refresh?: boolean | undefined;
   /** Replace the approved security header values with the observed ones. */
   headers?: boolean | undefined;
-  /** Snapshot file (relative to cwd) instead of `.tessera/last.<profile>.json`. */
+  /** Snapshot file (relative to cwd) instead of `.scriptlock/last.<profile>.json`. */
   snapshot?: string | undefined;
 }
 
@@ -123,7 +123,7 @@ export function todayUtc(now: Date = new Date()): string {
 
 function assertChoice<T extends string>(value: string | undefined, choices: readonly T[], flag: string): asserts value is T | undefined {
   if (value !== undefined && !(choices as readonly string[]).includes(value)) {
-    throw new TesseraError('UNSUPPORTED', `invalid value "${value}" for ${flag}; expected one of ${choices.join(', ')}`, { exitCode: 2 });
+    throw new ScriptlockError('UNSUPPORTED', `invalid value "${value}" for ${flag}; expected one of ${choices.join(', ')}`, { exitCode: 2 });
   }
 }
 
@@ -141,9 +141,9 @@ export async function runApprove(ctx: CommandContext, opts: ApproveCommandOption
   const refresh = opts.refresh === true;
   const headers = opts.headers === true;
   if (ids.length === 0 && !allNew && !refresh && !headers) {
-    throw new TesseraError('UNSUPPORTED', 'nothing to approve: pass at least one script id, --all-new, --refresh or --headers', {
+    throw new ScriptlockError('UNSUPPORTED', 'nothing to approve: pass at least one script id, --all-new, --refresh or --headers', {
       exitCode: 2,
-      hint: 'Run "tessera scan" and pick ids from its output, or use --all-new to approve every unapproved script',
+      hint: 'Run "scriptlock scan" and pick ids from its output, or use --all-new to approve every unapproved script',
     });
   }
   assertChoice(opts.category, SCRIPT_CATEGORIES, '--category');
@@ -156,10 +156,10 @@ export async function runApprove(ctx: CommandContext, opts: ApproveCommandOption
   const snapshotPath = opts.snapshot !== undefined ? path.resolve(ctx.cwd, opts.snapshot) : lastSnapshotPath(ctx.cwd, opts.profile);
   const snapshot = await readSnapshot(snapshotPath);
   if (snapshot.blocked !== undefined) {
-    throw new TesseraError(
+    throw new ScriptlockError(
       'SCAN_BLOCKED',
       `snapshot ${snapshotPath} was recorded behind a bot-management challenge page (${snapshot.blocked.vendor}: ${snapshot.blocked.evidence}); refusing to approve an unreliable inventory`,
-      { exitCode: 2, hint: 'Allowlist the scanner (browser.extraHeaders) and run "tessera scan" again' },
+      { exitCode: 2, hint: 'Allowlist the scanner (browser.extraHeaders) and run "scriptlock scan" again' },
     );
   }
 
@@ -168,7 +168,7 @@ export async function runApprove(ctx: CommandContext, opts: ApproveCommandOption
   try {
     manifest = await readManifest(manifestPath);
   } catch (error) {
-    if (!isTesseraError(error) || error.code !== 'MANIFEST_NOT_FOUND') throw error;
+    if (!isScriptlockError(error) || error.code !== 'MANIFEST_NOT_FOUND') throw error;
     manifest = emptyManifest(opts.profile, loaded.profile.url);
     manifest.headers.values = { ...snapshot.headers };
     created = true;

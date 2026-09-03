@@ -1,12 +1,12 @@
-# Composite GitHub Action for Tessera.
-# Installs Node and tessera-cli, installs Chromium with the CLI's bundled playwright-core,
-# runs `tessera diff`, writes the
-# markdown report to the job summary and the text report to the log, uploads .tessera/
-# as a run artifact and exits with Tessera's own exit code (0 clean, 1 findings, 2 run error).
+# Composite GitHub Action for Scriptlock.
+# Installs Node and scriptlock, installs Chromium with the CLI's bundled playwright-core,
+# runs `scriptlock diff`, writes the
+# markdown report to the job summary and the text report to the log, uploads .scriptlock/
+# as a run artifact and exits with Scriptlock's own exit code (0 clean, 1 findings, 2 run error).
 # Known limitations: a Linux runner with apt is assumed for `--with-deps`; the scan runs
 # once and both reports are rendered from that single snapshot.
-name: Tessera
-description: Script inventory and change detection for web pages. Runs tessera diff and publishes the report.
+name: Scriptlock
+description: Script inventory and change detection for web pages. Runs scriptlock diff and publishes the report.
 author: Vladimir Nizovtsev
 
 branding:
@@ -15,7 +15,7 @@ branding:
 
 inputs:
   profile:
-    description: Profile name from tessera.config.yaml.
+    description: Profile name from scriptlock.config.yaml.
     required: false
     default: default
   mode:
@@ -23,7 +23,7 @@ inputs:
     required: false
     default: gate
   config:
-    description: Path to tessera.config.yaml, relative to working-directory. Empty means the default lookup.
+    description: Path to scriptlock.config.yaml, relative to working-directory. Empty means the default lookup.
     required: false
     default: ""
   node-version:
@@ -31,24 +31,24 @@ inputs:
     required: false
     default: "20"
   version:
-    description: tessera-cli version to install from npm.
+    description: scriptlock version to install from npm.
     required: false
     default: latest
   history:
-    description: Also write the snapshot and diff under .tessera/history/<profile>/ (true or false).
+    description: Also write the snapshot and diff under .scriptlock/history/<profile>/ (true or false).
     required: false
     default: "false"
   working-directory:
-    description: Directory containing tessera.config.yaml and the manifest.
+    description: Directory containing scriptlock.config.yaml and the manifest.
     required: false
     default: "."
 
 outputs:
   exit-code:
-    description: Exit code of tessera diff. 0 clean, 1 findings at fail severity, 2 run error (blocked, navigation failure, invalid configuration).
+    description: Exit code of scriptlock diff. 0 clean, 1 findings at fail severity, 2 run error (blocked, navigation failure, invalid configuration).
     value: ${{ steps.diff-md.outputs.exit-code }}
   summary-file:
-    description: Absolute path of the markdown report written by tessera diff --format md.
+    description: Absolute path of the markdown report written by scriptlock diff --format md.
     value: ${{ steps.diff-md.outputs.summary-file }}
 
 runs:
@@ -59,59 +59,59 @@ runs:
       with:
         node-version: ${{ inputs.node-version }}
 
-    - name: Install tessera-cli
+    - name: Install scriptlock
       shell: bash
       env:
-        TESSERA_VERSION: ${{ inputs.version }}
-      run: npm install -g "tessera-cli@$TESSERA_VERSION"
+        SCRIPTLOCK_VERSION: ${{ inputs.version }}
+      run: npm install -g "scriptlock@$SCRIPTLOCK_VERSION"
 
     - name: Install Chromium
       shell: bash
-      # Install with the playwright-core bundled inside the just-installed tessera-cli,
+      # Install with the playwright-core bundled inside the just-installed scriptlock,
       # so the browser revision is exactly the one the CLI looks for.
-      run: node "$(npm root -g)/tessera-cli/node_modules/playwright-core/cli.js" install --with-deps chromium
+      run: node "$(npm root -g)/scriptlock/node_modules/playwright-core/cli.js" install --with-deps chromium
 
     - name: Validate inputs
       shell: bash
       env:
-        TESSERA_MODE: ${{ inputs.mode }}
-        TESSERA_HISTORY: ${{ inputs.history }}
+        SCRIPTLOCK_MODE: ${{ inputs.mode }}
+        SCRIPTLOCK_HISTORY: ${{ inputs.history }}
       run: |
-        case "$TESSERA_MODE" in
+        case "$SCRIPTLOCK_MODE" in
           gate|drift) ;;
-          *) echo "error: mode must be gate or drift, got '$TESSERA_MODE'" >&2; exit 2 ;;
+          *) echo "error: mode must be gate or drift, got '$SCRIPTLOCK_MODE'" >&2; exit 2 ;;
         esac
-        case "$TESSERA_HISTORY" in
+        case "$SCRIPTLOCK_HISTORY" in
           true|false) ;;
-          *) echo "error: history must be true or false, got '$TESSERA_HISTORY'" >&2; exit 2 ;;
+          *) echo "error: history must be true or false, got '$SCRIPTLOCK_HISTORY'" >&2; exit 2 ;;
         esac
 
     - name: Scan
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
-        TESSERA_PROFILE: ${{ inputs.profile }}
-        TESSERA_CONFIG: ${{ inputs.config }}
+        SCRIPTLOCK_PROFILE: ${{ inputs.profile }}
+        SCRIPTLOCK_CONFIG: ${{ inputs.config }}
       run: |
-        mkdir -p .tessera
-        args=(scan --profile "$TESSERA_PROFILE" --out ".tessera/last.$TESSERA_PROFILE.json")
-        if [ -n "$TESSERA_CONFIG" ]; then args+=(--config "$TESSERA_CONFIG"); fi
-        tessera "${args[@]}"
+        mkdir -p .scriptlock
+        args=(scan --profile "$SCRIPTLOCK_PROFILE" --out ".scriptlock/last.$SCRIPTLOCK_PROFILE.json")
+        if [ -n "$SCRIPTLOCK_CONFIG" ]; then args+=(--config "$SCRIPTLOCK_CONFIG"); fi
+        scriptlock "${args[@]}"
 
     - name: Diff (markdown to job summary)
       id: diff-md
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
-        TESSERA_PROFILE: ${{ inputs.profile }}
-        TESSERA_CONFIG: ${{ inputs.config }}
-        TESSERA_MODE: ${{ inputs.mode }}
+        SCRIPTLOCK_PROFILE: ${{ inputs.profile }}
+        SCRIPTLOCK_CONFIG: ${{ inputs.config }}
+        SCRIPTLOCK_MODE: ${{ inputs.mode }}
       run: |
-        summary="$PWD/.tessera/diff.$TESSERA_PROFILE.md"
-        args=(diff --profile "$TESSERA_PROFILE" "--$TESSERA_MODE" --snapshot ".tessera/last.$TESSERA_PROFILE.json" --format md --out "$summary")
-        if [ -n "$TESSERA_CONFIG" ]; then args+=(--config "$TESSERA_CONFIG"); fi
+        summary="$PWD/.scriptlock/diff.$SCRIPTLOCK_PROFILE.md"
+        args=(diff --profile "$SCRIPTLOCK_PROFILE" "--$SCRIPTLOCK_MODE" --snapshot ".scriptlock/last.$SCRIPTLOCK_PROFILE.json" --format md --out "$summary")
+        if [ -n "$SCRIPTLOCK_CONFIG" ]; then args+=(--config "$SCRIPTLOCK_CONFIG"); fi
         set +e
-        tessera "${args[@]}"
+        scriptlock "${args[@]}"
         code=$?
         set -e
         echo "exit-code=$code" >> "$GITHUB_OUTPUT"
@@ -119,7 +119,7 @@ runs:
         if [ -f "$summary" ]; then
           cat "$summary" >> "$GITHUB_STEP_SUMMARY"
         else
-          echo "tessera diff exited with code $code before writing a report." >> "$GITHUB_STEP_SUMMARY"
+          echo "scriptlock diff exited with code $code before writing a report." >> "$GITHUB_STEP_SUMMARY"
           exit "$code"
         fi
 
@@ -127,22 +127,22 @@ runs:
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
-        TESSERA_PROFILE: ${{ inputs.profile }}
-        TESSERA_CONFIG: ${{ inputs.config }}
-        TESSERA_MODE: ${{ inputs.mode }}
-        TESSERA_HISTORY: ${{ inputs.history }}
+        SCRIPTLOCK_PROFILE: ${{ inputs.profile }}
+        SCRIPTLOCK_CONFIG: ${{ inputs.config }}
+        SCRIPTLOCK_MODE: ${{ inputs.mode }}
+        SCRIPTLOCK_HISTORY: ${{ inputs.history }}
       run: |
-        args=(diff --profile "$TESSERA_PROFILE" "--$TESSERA_MODE" --snapshot ".tessera/last.$TESSERA_PROFILE.json" --format text)
-        if [ -n "$TESSERA_CONFIG" ]; then args+=(--config "$TESSERA_CONFIG"); fi
-        if [ "$TESSERA_HISTORY" = "true" ]; then args+=(--history); fi
+        args=(diff --profile "$SCRIPTLOCK_PROFILE" "--$SCRIPTLOCK_MODE" --snapshot ".scriptlock/last.$SCRIPTLOCK_PROFILE.json" --format text)
+        if [ -n "$SCRIPTLOCK_CONFIG" ]; then args+=(--config "$SCRIPTLOCK_CONFIG"); fi
+        if [ "$SCRIPTLOCK_HISTORY" = "true" ]; then args+=(--history); fi
         # The exit code of this command is the exit code of the action. It is not swallowed.
-        tessera "${args[@]}"
+        scriptlock "${args[@]}"
 
-    - name: Upload .tessera as a run artifact
+    - name: Upload .scriptlock as a run artifact
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: tessera-${{ inputs.profile }}-${{ github.job }}
-        path: ${{ inputs.working-directory }}/.tessera
+        name: scriptlock-${{ inputs.profile }}-${{ github.job }}
+        path: ${{ inputs.working-directory }}/.scriptlock
         if-no-files-found: warn
         retention-days: 400

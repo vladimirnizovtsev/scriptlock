@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TesseraError } from '../../../src/errors.js';
+import { ScriptlockError } from '../../../src/errors.js';
 import {
   approveFrames,
   approveScripts,
@@ -47,7 +47,7 @@ function frame(url: string, overrides: Partial<FrameInfo> = {}): FrameInfo {
 function snapshot(scripts: ObservedScript[], frames: FrameInfo[] = []): Snapshot {
   return {
     version: 1,
-    tool: { name: 'tessera', version: '0.0.0' },
+    tool: { name: 'scriptlock', version: '0.0.0' },
     profile: 'checkout',
     url: `${MAIN}/checkout`,
     finalUrl: `${MAIN}/checkout`,
@@ -220,8 +220,8 @@ describe('approveScripts selection', () => {
     } catch (error) {
       caught = error;
     }
-    expect(caught).toBeInstanceOf(TesseraError);
-    const err = caught as TesseraError;
+    expect(caught).toBeInstanceOf(ScriptlockError);
+    const err = caught as ScriptlockError;
     expect(err.code).toBe('SNAPSHOT_INVALID');
     expect(err.message).toContain(`${MAIN}/missing.js`);
     expect(err.message).toContain('checkout');
@@ -323,7 +323,7 @@ describe('refreshScripts', () => {
   });
 
   it('throws for unknown or unobserved ids', () => {
-    expect(() => refreshScripts(start, later, [`${MAIN}/nope.js`])).toThrow(TesseraError);
+    expect(() => refreshScripts(start, later, [`${MAIN}/nope.js`])).toThrow(ScriptlockError);
     expect(() => refreshScripts(start, later, ['https://js.stripe.com/v3'])).toThrow(/not observed/);
   });
 });
@@ -383,7 +383,7 @@ describe('approveScripts: worker and body-not-captured entries', () => {
 
   it('refuses --integrity strict or structural for a body that was not captured', () => {
     expect(() => approveScripts(base(), snapshot([workerScript]), [`${MAIN}/worker.js`], { ...META, integrity: 'strict' }, DEFAULTS)).toThrow(/body was not captured/);
-    expect(() => approveScripts(base(), snapshot([workerScript]), [`${MAIN}/worker.js`], { ...META, integrity: 'structural' }, DEFAULTS)).toThrow(TesseraError);
+    expect(() => approveScripts(base(), snapshot([workerScript]), [`${MAIN}/worker.js`], { ...META, integrity: 'structural' }, DEFAULTS)).toThrow(ScriptlockError);
     // url-only is accepted.
     expect(approveScripts(base(), snapshot([workerScript]), [`${MAIN}/worker.js`], { ...META, integrity: 'url-only' }, DEFAULTS).scripts[0]?.integrity).toBe('url-only');
   });

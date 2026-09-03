@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { TesseraError } from '../../../src/errors.js';
+import { ScriptlockError } from '../../../src/errors.js';
 import { emptyManifest, parseManifest, readManifest, serialiseManifest, sortManifest, writeManifest } from '../../../src/manifest/io.js';
 import type { Manifest, ManifestScript } from '../../../src/types.js';
 
@@ -120,14 +120,14 @@ describe('serialiseManifest', () => {
 describe('round trip', () => {
   let dir: string;
   beforeEach(async () => {
-    dir = await mkdtemp(path.join(os.tmpdir(), 'tessera-manifest-'));
+    dir = await mkdtemp(path.join(os.tmpdir(), 'scriptlock-manifest-'));
   });
   afterEach(async () => {
     await rm(dir, { recursive: true, force: true });
   });
 
   it('write then read yields an equal, sorted manifest, and rewriting is byte-identical', async () => {
-    const file = path.join(dir, 'nested', 'tessera.checkout.lock.yaml');
+    const file = path.join(dir, 'nested', 'scriptlock.checkout.lock.yaml');
     const manifest = sample();
     await writeManifest(file, manifest);
     const read = await readManifest(file);
@@ -184,14 +184,14 @@ ignore: []
 describe('errors', () => {
   let dir: string;
   beforeEach(async () => {
-    dir = await mkdtemp(path.join(os.tmpdir(), 'tessera-manifest-'));
+    dir = await mkdtemp(path.join(os.tmpdir(), 'scriptlock-manifest-'));
   });
   afterEach(async () => {
     await rm(dir, { recursive: true, force: true });
   });
 
   it('MANIFEST_NOT_FOUND with exit code 1 and an approve hint', async () => {
-    const file = path.join(dir, 'tessera.lock.yaml');
+    const file = path.join(dir, 'scriptlock.lock.yaml');
     await expect(readManifest(file)).rejects.toMatchObject({
       code: 'MANIFEST_NOT_FOUND',
       exitCode: 1,
@@ -201,7 +201,7 @@ describe('errors', () => {
   });
 
   it('MANIFEST_INVALID names the path and the problem', async () => {
-    const file = path.join(dir, 'tessera.lock.yaml');
+    const file = path.join(dir, 'scriptlock.lock.yaml');
     await writeFile(file, 'version: 1\nprofile: default\nurl: https://x.example/\nscripts:\n  - id: a\n    kind: external\n    scope: merchant\n    integrity: strict\n    integrityMethod: hash-strict\n    owner: web\n    category: functional\n    justification: j\n    approvedBy: v\n    approvedAt: 2026-09-02\n');
     let caught: unknown;
     try {
@@ -209,8 +209,8 @@ describe('errors', () => {
     } catch (error) {
       caught = error;
     }
-    expect(caught).toBeInstanceOf(TesseraError);
-    const err = caught as TesseraError;
+    expect(caught).toBeInstanceOf(ScriptlockError);
+    const err = caught as ScriptlockError;
     expect(err.code).toBe('MANIFEST_INVALID');
     expect(err.exitCode).toBe(2);
     expect(err.message).toContain(file);

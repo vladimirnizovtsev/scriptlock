@@ -1,14 +1,14 @@
-# Contributing to Tessera
+# Contributing to Scriptlock
 
-Thank you for taking the time. Tessera is small and opinionated; the fastest way to get a change merged is to read [DESIGN.md](DESIGN.md) first, because it is the engineering contract that every module follows.
+Thank you for taking the time. Scriptlock is small and opinionated; the fastest way to get a change merged is to read [DESIGN.md](DESIGN.md) first, because it is the engineering contract that every module follows.
 
 ## Development setup
 
 Requirements: Node 20 or later, npm, and a machine that can run Chromium.
 
 ```sh
-git clone https://github.com/vladimirnizovtsev/tessera.git
-cd tessera
+git clone https://github.com/vladimirnizovtsev/scriptlock.git
+cd scriptlock
 npm ci
 npx playwright-core install chromium     # on Linux CI add --with-deps
 ```
@@ -36,10 +36,10 @@ Conventions, in short (DESIGN.md section 11):
 - TypeScript strict, ESM, NodeNext resolution: relative imports use the `.js` extension.
 - No default exports, except user flow modules.
 - Every module file starts with a short comment stating what it owns and its known limitations.
-- Errors thrown to the CLI are `TesseraError` with a `code` and an `exitCode`.
+- Errors thrown to the CLI are `ScriptlockError` with a `code` and an `exitCode`.
 - Unit tests make no network calls. E2E tests use only the fixture server.
 - English everywhere: code, comments, docs, commit messages. No emojis.
-- User-facing text never says "ensures compliance", "PCI compliant" or "QSA validated". Tessera produces evidence artifacts and helps you prepare. See the README "Limits" section.
+- User-facing text never says "ensures compliance", "PCI compliant" or "QSA validated". Scriptlock produces evidence artifacts and helps you prepare. See the README "Limits" section.
 
 ## Tests
 
@@ -53,7 +53,7 @@ Add a unit test for pure logic (normalisation, hashing, matching, diff rows, ren
 
 ### Developer Certificate of Origin
 
-Tessera uses the [Developer Certificate of Origin](https://developercertificate.org/) instead of a Contributor License Agreement. There is no CLA to sign. By adding a `Signed-off-by` line to your commits you certify that you wrote the change or otherwise have the right to submit it under the MIT license.
+Scriptlock uses the [Developer Certificate of Origin](https://developercertificate.org/) instead of a Contributor License Agreement. There is no CLA to sign. By adding a `Signed-off-by` line to your commits you certify that you wrote the change or otherwise have the right to submit it under the Apache License 2.0.
 
 ```sh
 git commit -s -m "Add header policy ignore"
@@ -69,8 +69,8 @@ Pull requests with unsigned commits will be asked to rebase with `git rebase --s
 
 ## Reporting bugs and vulnerabilities
 
-Bugs: open an issue using the bug report template. Vulnerabilities in Tessera itself: do not open an issue; follow [SECURITY.md](SECURITY.md).
+Bugs: open an issue using the bug report template. Vulnerabilities in Scriptlock itself: do not open an issue; follow [SECURITY.md](SECURITY.md).
 
 ## Scope of contributions
 
-Things that fit version 1: collection accuracy, identity and normalisation rules, new payment provider or 3DS host patterns, report formats, documentation and examples. Things on the roadmap that are welcome as proposals first: worker script bodies, a CSP draft, SARIF output, alert webhooks, a history store. Things that will not be merged: stealth or anti-bot-detection patches, an in-page agent, anything that sends scan data to a third party by default, and wording that presents Tessera as an attestation of compliance.
+Things that fit version 1: collection accuracy, identity and normalisation rules, new payment provider or 3DS host patterns, report formats, documentation and examples. Things on the roadmap that are welcome as proposals first: worker script bodies, a CSP draft, SARIF output, alert webhooks, a history store. Things that will not be merged: stealth or anti-bot-detection patches, an in-page agent, anything that sends scan data to a third party by default, and wording that presents Scriptlock as an attestation of compliance.

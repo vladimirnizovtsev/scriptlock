@@ -1,10 +1,10 @@
 /**
- * `tessera init` (DESIGN.md section 8): write an annotated tessera.config.yaml
+ * `scriptlock init` (DESIGN.md section 8): write an annotated scriptlock.config.yaml
  * with a single "default" profile into the working directory. The template is
  * validated with the configuration schema before it is written, so `init`
  * never produces a file that `loadConfig` would reject.
  *
- * Limitations: refuses to overwrite an existing tessera.config.yaml or .yml
+ * Limitations: refuses to overwrite an existing scriptlock.config.yaml or .yml
  * unless `force` is set; the profile URL is the only value taken from the
  * command line.
  */
@@ -12,7 +12,7 @@ import { access, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { CONFIG_FILE_NAMES, parseConfig } from '../config/load.js';
 import { DEFAULT_PROFILE_URL, DEFAULT_SETTLE_MS, DEFAULT_TIMEOUT_MS, DEFAULT_VIEWPORT } from '../config/schema.js';
-import { TesseraError } from '../errors.js';
+import { ScriptlockError } from '../errors.js';
 import type { CommandContext } from './scan.js';
 
 export interface InitCommandOptions {
@@ -28,9 +28,9 @@ export interface InitCommandResult {
   content: string;
 }
 
-/** The annotated configuration written by `tessera init`. */
+/** The annotated configuration written by `scriptlock init`. */
 export function configTemplate(url: string = DEFAULT_PROFILE_URL): string {
-  return `# Tessera configuration. Documentation: https://github.com/vladimirnizovtsev/tessera#configuration
+  return `# Scriptlock configuration. Documentation: https://github.com/vladimirnizovtsev/scriptlock#configuration
 # Every \${VAR} in a string value is replaced from the environment when the file is loaded;
 # a missing variable is a configuration error that names the variable.
 version: 1
@@ -48,7 +48,7 @@ browser:
   # management. Add extraHeadersHosts (host globs, or "*") to send them to more hosts. No
   # stealth patches. The token is never sent to third-party script hosts or provider iframes.
   # extraHeaders:
-  #   X-Scanner-Token: \${TESSERA_SCANNER_TOKEN}
+  #   X-Scanner-Token: \${SCRIPTLOCK_SCANNER_TOKEN}
   # extraHeadersHosts: []
 
 identity:
@@ -68,7 +68,7 @@ scope:
   # Host globs of 3-D Secure / ACS frames, added to the built-ins.
   threeds: []
 
-# Integrity policy applied by \`tessera approve\` when --integrity is not given.
+# Integrity policy applied by \`scriptlock approve\` when --integrity is not given.
 integrity:
   firstParty: strict # host equals the main-frame host or a subdomain of it
   thirdParty: track # everything else; body changes are recorded, never fail
@@ -76,7 +76,7 @@ integrity:
   eval: structural
 
 profiles:
-  # Manifest: tessera.lock.yaml. Stop at the rendered payment form; never submit a card.
+  # Manifest: scriptlock.lock.yaml. Stop at the rendered payment form; never submit a card.
   default:
     url: ${JSON.stringify(url)}
     # Optional flow: a list of steps (goto, click, fill, select, waitFor, wait, press,
@@ -87,7 +87,7 @@ profiles:
     wait: networkidle # load | domcontentloaded | networkidle | commit
     settleMs: ${DEFAULT_SETTLE_MS} # idle time after the last step, to catch late tags
     runs: 1 # scans unioned per run; absence must hold in all runs
-    history: false # keep snapshots and diffs under .tessera/history/default/
+    history: false # keep snapshots and diffs under .scriptlock/history/default/
 `;
 }
 
@@ -101,12 +101,12 @@ async function exists(file: string): Promise<boolean> {
 }
 
 export async function runInit(ctx: CommandContext, opts: InitCommandOptions = {}): Promise<InitCommandResult> {
-  const target = path.join(ctx.cwd, 'tessera.config.yaml');
+  const target = path.join(ctx.cwd, 'scriptlock.config.yaml');
   if (opts.force !== true) {
     for (const name of CONFIG_FILE_NAMES) {
       const candidate = path.join(ctx.cwd, name);
       if (await exists(candidate)) {
-        throw new TesseraError('UNSUPPORTED', `configuration already exists: ${candidate}`, {
+        throw new ScriptlockError('UNSUPPORTED', `configuration already exists: ${candidate}`, {
           exitCode: 2,
           hint: 'Edit the existing file, or pass --force to overwrite it',
         });
@@ -121,10 +121,10 @@ export async function runInit(ctx: CommandContext, opts: InitCommandOptions = {}
     [
       `wrote ${target}`,
       'Next steps:',
-      '  1. Edit the profile URL (and steps) in tessera.config.yaml.',
-      '  2. tessera scan                 record every script and header of the page',
-      '  3. tessera approve --all-new --owner <team> --category <category> --justification "<why>"',
-      '  4. tessera diff --gate          compare a fresh scan with the manifest; exit 0 clean, 1 findings, 2 run error',
+      '  1. Edit the profile URL (and steps) in scriptlock.config.yaml.',
+      '  2. scriptlock scan                 record every script and header of the page',
+      '  3. scriptlock approve --all-new --owner <team> --category <category> --justification "<why>"',
+      '  4. scriptlock diff --gate          compare a fresh scan with the manifest; exit 0 clean, 1 findings, 2 run error',
     ].join('\n'),
   );
   return { path: target, content };

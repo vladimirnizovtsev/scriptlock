@@ -1,5 +1,5 @@
 /**
- * Locate, parse, interpolate and validate tessera.config.yaml.
+ * Locate, parse, interpolate and validate scriptlock.config.yaml.
  *
  * Owns: `loadConfig()`, `parseConfig()`, `interpolateEnv()`,
  * `manifestPathFor()`, `CONFIG_FILE_NAMES`.
@@ -13,11 +13,11 @@
 import { access, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import YAML from 'yaml';
-import { TesseraError } from '../errors.js';
-import type { ProfileConfig, TesseraConfig } from '../types.js';
-import { configSchema, formatConfigIssues, toTesseraConfig } from './schema.js';
+import { ScriptlockError } from '../errors.js';
+import type { ProfileConfig, ScriptlockConfig } from '../types.js';
+import { configSchema, formatConfigIssues, toScriptlockConfig } from './schema.js';
 
-export const CONFIG_FILE_NAMES: readonly string[] = ['tessera.config.yaml', 'tessera.config.yml'];
+export const CONFIG_FILE_NAMES: readonly string[] = ['scriptlock.config.yaml', 'scriptlock.config.yml'];
 
 export interface ParseConfigOptions {
   /** File path used in error messages. */
@@ -41,10 +41,10 @@ export function interpolateEnv(
     return value.replace(ENV_REFERENCE, (_match, name: string) => {
       const replacement = env[name];
       if (replacement === undefined) {
-        throw new TesseraError(
+        throw new ScriptlockError(
           'CONFIG_INVALID',
           `Configuration value at ${location} references environment variable ${name}, which is not set`,
-          { hint: `Export ${name} before running tessera, or remove the \${${name}} reference` },
+          { hint: `Export ${name} before running scriptlock, or remove the \${${name}} reference` },
         );
       }
       return replacement;
@@ -63,30 +63,30 @@ export function interpolateEnv(
   return value;
 }
 
-/** Parses YAML text into a validated `TesseraConfig`. */
-export function parseConfig(text: string, options: ParseConfigOptions = {}): TesseraConfig {
+/** Parses YAML text into a validated `ScriptlockConfig`. */
+export function parseConfig(text: string, options: ParseConfigOptions = {}): ScriptlockConfig {
   const where = options.path ?? 'configuration';
   let raw: unknown;
   try {
     raw = YAML.parse(text);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    throw new TesseraError('CONFIG_INVALID', `Invalid YAML in ${where}: ${detail}`, { cause: error });
+    throw new ScriptlockError('CONFIG_INVALID', `Invalid YAML in ${where}: ${detail}`, { cause: error });
   }
   if (raw === null || raw === undefined) {
-    throw new TesseraError('CONFIG_INVALID', `Configuration file ${where} is empty`, {
-      hint: 'Run "tessera init" to write a starter configuration',
+    throw new ScriptlockError('CONFIG_INVALID', `Configuration file ${where} is empty`, {
+      hint: 'Run "scriptlock init" to write a starter configuration',
     });
   }
   if (typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new TesseraError('CONFIG_INVALID', `Configuration file ${where} must be a YAML mapping`);
+    throw new ScriptlockError('CONFIG_INVALID', `Configuration file ${where} must be a YAML mapping`);
   }
   const interpolated = interpolateEnv(raw, options.env ?? process.env);
   const result = configSchema.safeParse(interpolated);
   if (!result.success) {
-    throw new TesseraError('CONFIG_INVALID', `Invalid configuration in ${where}:\n${formatConfigIssues(result.error.issues)}`);
+    throw new ScriptlockError('CONFIG_INVALID', `Invalid configuration in ${where}:\n${formatConfigIssues(result.error.issues)}`);
   }
-  return toTesseraConfig(result.data);
+  return toScriptlockConfig(result.data);
 }
 
 async function exists(file: string): Promise<boolean> {
@@ -100,16 +100,16 @@ async function exists(file: string): Promise<boolean> {
 
 /**
  * Finds and loads the configuration. With `explicitPath` (resolved against
- * `cwd`) only that file is considered; otherwise `tessera.config.yaml`, then
- * `tessera.config.yml`, in `cwd`.
+ * `cwd`) only that file is considered; otherwise `scriptlock.config.yaml`, then
+ * `scriptlock.config.yml`, in `cwd`.
  */
-export async function loadConfig(cwd: string, explicitPath?: string): Promise<{ config: TesseraConfig; path: string }> {
+export async function loadConfig(cwd: string, explicitPath?: string): Promise<{ config: ScriptlockConfig; path: string }> {
   let file: string | undefined;
   if (explicitPath !== undefined) {
     const candidate = path.resolve(cwd, explicitPath);
     if (!(await exists(candidate))) {
-      throw new TesseraError('CONFIG_NOT_FOUND', `Configuration file not found: ${candidate}`, {
-        hint: 'Check the --config path, or run "tessera init" to create a configuration',
+      throw new ScriptlockError('CONFIG_NOT_FOUND', `Configuration file not found: ${candidate}`, {
+        hint: 'Check the --config path, or run "scriptlock init" to create a configuration',
       });
     }
     file = candidate;
@@ -122,8 +122,8 @@ export async function loadConfig(cwd: string, explicitPath?: string): Promise<{ 
       }
     }
     if (file === undefined) {
-      throw new TesseraError('CONFIG_NOT_FOUND', `No ${CONFIG_FILE_NAMES.join(' or ')} found in ${cwd}`, {
-        hint: 'Run "tessera init" to create one, or pass --config <path>',
+      throw new ScriptlockError('CONFIG_NOT_FOUND', `No ${CONFIG_FILE_NAMES.join(' or ')} found in ${cwd}`, {
+        hint: 'Run "scriptlock init" to create one, or pass --config <path>',
       });
     }
   }
@@ -133,11 +133,11 @@ export async function loadConfig(cwd: string, explicitPath?: string): Promise<{ 
 
 /**
  * Manifest path for a profile: `profile.manifest` when set, otherwise
- * `tessera.lock.yaml` for "default" and `tessera.<profile>.lock.yaml` for any
+ * `scriptlock.lock.yaml` for "default" and `scriptlock.<profile>.lock.yaml` for any
  * other profile. Always absolute, resolved against `cwd`.
  */
 export function manifestPathFor(profileName: string, profile: Pick<ProfileConfig, 'manifest'>, cwd: string): string {
   if (profile.manifest !== undefined) return path.resolve(cwd, profile.manifest);
-  const name = profileName === 'default' ? 'tessera.lock.yaml' : `tessera.${profileName}.lock.yaml`;
+  const name = profileName === 'default' ? 'scriptlock.lock.yaml' : `scriptlock.${profileName}.lock.yaml`;
   return path.resolve(cwd, name);
 }

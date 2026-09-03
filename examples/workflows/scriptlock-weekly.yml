@@ -1,11 +1,11 @@
-# Weekly drift run. Copy to .github/workflows/tessera-weekly.yml in your repository.
+# Weekly drift run. Copy to .github/workflows/scriptlock-weekly.yml in your repository.
 #
 # The scheduled run is the 11.6.1 change-detection mechanism: it re-scans the payment
 # page, compares it to the manifest committed in this repository, writes the report to
-# the job summary, keeps the snapshot and diff under .tessera/history/ and uploads them as
+# the job summary, keeps the snapshot and diff under .scriptlock/history/ and uploads them as
 # a run artifact. When the run fails, GitHub emails the person who last edited the cron
 # line below (Actions notifications must be enabled for that account).
-name: Tessera weekly drift
+name: Scriptlock weekly drift
 
 on:
   schedule:
@@ -26,18 +26,18 @@ jobs:
       matrix:
         profile: [default]
     env:
-      # Referenced by browser.extraHeaders in tessera.config.yaml. A missing variable is a
+      # Referenced by browser.extraHeaders in scriptlock.config.yaml. A missing variable is a
       # configuration error, so define every ${VAR} the config references.
-      TESSERA_SCANNER_TOKEN: ${{ secrets.TESSERA_SCANNER_TOKEN }}
-      # The preview profile in examples/tessera.config.yaml interpolates PREVIEW_URL.
+      SCRIPTLOCK_SCANNER_TOKEN: ${{ secrets.SCRIPTLOCK_SCANNER_TOKEN }}
+      # The preview profile in examples/scriptlock.config.yaml interpolates PREVIEW_URL.
       # It is not scanned here, but the config must still load; point it at production.
       PREVIEW_URL: https://shop.example.com/checkout
     steps:
       - uses: actions/checkout@v4
 
       # Pin to a release tag or, better, a full commit SHA for supply chain hygiene.
-      - name: Tessera
-        uses: vladimirnizovtsev/tessera@v1
+      - name: Scriptlock
+        uses: vladimirnizovtsev/scriptlock@v1
         with:
           profile: ${{ matrix.profile }}
           mode: drift

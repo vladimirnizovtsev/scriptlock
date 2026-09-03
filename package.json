@@ -1,5 +1,5 @@
 {
-  "name": "tessera-cli",
+  "name": "scriptlock",
   "version": "0.0.0",
   "description": "Client-side script inventory and change detection for web pages. A lockfile for everything that executes in the browser.",
   "keywords": [
@@ -17,20 +17,20 @@
     "security-headers",
     "third-party-scripts"
   ],
-  "license": "MIT",
+  "license": "Apache-2.0",
   "author": "Vladimir Nizovtsev",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vladimirnizovtsev/tessera.git"
+    "url": "git+https://github.com/vladimirnizovtsev/scriptlock.git"
   },
-  "bugs": "https://github.com/vladimirnizovtsev/tessera/issues",
-  "homepage": "https://github.com/vladimirnizovtsev/tessera#readme",
+  "bugs": "https://github.com/vladimirnizovtsev/scriptlock/issues",
+  "homepage": "https://github.com/vladimirnizovtsev/scriptlock#readme",
   "type": "module",
   "engines": {
     "node": ">=20"
   },
   "bin": {
-    "tessera": "./dist/cli.js"
+    "scriptlock": "./dist/cli.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -44,7 +44,8 @@
     "dist",
     "action.yml",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE"
   ],
   "scripts": {
     "build": "tsup && tsc --emitDeclarationOnly",

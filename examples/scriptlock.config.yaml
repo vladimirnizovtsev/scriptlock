@@ -1,7 +1,7 @@
-# Example Tessera configuration. Copy to tessera.config.yaml in the root of your repository
+# Example Scriptlock configuration. Copy to scriptlock.config.yaml in the root of your repository
 # and edit the URLs. Every ${VAR} is replaced from the environment when the file is loaded;
 # a missing variable is a configuration error that names the variable, so define every
-# variable referenced here in every environment that runs Tessera, even for profiles that
+# variable referenced here in every environment that runs Scriptlock, even for profiles that
 # are not being scanned in that environment.
 version: 1
 
@@ -19,17 +19,17 @@ browser:
   # locale: en-GB
   # timezoneId: Europe/Berlin
   # Match this header in a skip or allow rule in your bot management (Cloudflare Super Bot
-  # Fight Mode skip rule, Akamai custom bot category, DataDome custom rule). Tessera ships no
+  # Fight Mode skip rule, Akamai custom bot category, DataDome custom rule). Scriptlock ships no
   # stealth patches. The header is sent only to the profile host and its subdomains; it is
   # stripped from requests to third-party script hosts and provider iframes.
   extraHeaders:
-    X-Scanner-Token: ${TESSERA_SCANNER_TOKEN}
+    X-Scanner-Token: ${SCRIPTLOCK_SCANNER_TOKEN}
   # Extra host globs that also receive extraHeaders (use "*" for every host). Keep the token
   # low-privilege regardless.
   # extraHeadersHosts: []
   # Playwright storageState JSON for authenticated flows (produced by your own login
   # script). Never commit it.
-  # storageState: .tessera/storage-state.json
+  # storageState: .scriptlock/storage-state.json
 
 identity:
   # Query parameters removed before identity is computed, in addition to the built-in
@@ -50,7 +50,7 @@ scope:
   # Host globs of 3-D Secure / ACS frames, added to the built-ins.
   threeds: []
 
-# Integrity policy applied by `tessera approve` when --integrity is not given.
+# Integrity policy applied by `scriptlock approve` when --integrity is not given.
 integrity:
   firstParty: strict     # host equals the main-frame host or a subdomain of it
   thirdParty: track      # everything else; body changes are recorded, never fail
@@ -58,33 +58,33 @@ integrity:
   eval: structural
 
 profiles:
-  # Production checkout. Manifest: tessera.lock.yaml. Stops at the rendered payment form.
+  # Production checkout. Manifest: scriptlock.lock.yaml. Stops at the rendered payment form.
   default:
     url: https://shop.example.com/
     steps:
       - goto: /product/42                  # relative to url
       - click: "text=Add to cart"
       - goto: /checkout
-      - fill: { selector: "#email", value: "tessera-scan@example.com" }
+      - fill: { selector: "#email", value: "scriptlock-scan@example.com" }
       - waitFor: "#payment-element iframe"
       - wait: 2000
     wait: networkidle                      # load | domcontentloaded | networkidle | commit
     settleMs: 3000                         # idle time after the last step, to catch late tags
     runs: 2                                # scans unioned per run; absence must hold in all runs
-    history: true                          # keep snapshots and diffs under .tessera/history/default/
+    history: true                          # keep snapshots and diffs under .scriptlock/history/default/
 
   # Preview deployment checked in the deploy gate against the production manifest.
-  # PREVIEW_URL is set by the workflow (see examples/workflows/tessera-deploy-gate.yml).
+  # PREVIEW_URL is set by the workflow (see examples/workflows/scriptlock-deploy-gate.yml).
   preview:
     url: ${PREVIEW_URL}
     steps: ./examples/checkout-flow.ts     # module escape hatch; .ts needs tsx installed
     wait: networkidle
     settleMs: 3000
     runs: 1
-    manifest: tessera.lock.yaml            # share the default manifest
+    manifest: scriptlock.lock.yaml            # share the default manifest
     history: false
 
-  # A second page with its own manifest: tessera.account.lock.yaml.
+  # A second page with its own manifest: scriptlock.account.lock.yaml.
   account:
     url: https://shop.example.com/account/payment-methods
     wait: networkidle

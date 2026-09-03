@@ -1,20 +1,20 @@
 /**
- * Configuration schema (zod v4) and defaults for tessera.config.yaml.
+ * Configuration schema (zod v4) and defaults for scriptlock.config.yaml.
  *
- * Owns: `configSchema`, `defaultConfig()`, `toTesseraConfig()` (converts the
- * zod output into the `TesseraConfig` contract type, dropping optional keys
+ * Owns: `configSchema`, `defaultConfig()`, `toScriptlockConfig()` (converts the
+ * zod output into the `ScriptlockConfig` contract type, dropping optional keys
  * whose value is undefined so the result is valid under
  * exactOptionalPropertyTypes), and `formatConfigIssues()`.
  *
  * Limitations: unknown keys are rejected everywhere except inside
  * `browser.extraHeaders` and the `profiles` map itself. Profile names must be
  * a single safe path segment (letters, digits, `.`, `_`, `-`, starting with a
- * letter or digit) because they become file names under `.tessera/`. Values
+ * letter or digit) because they become file names under `.scriptlock/`. Values
  * are validated for shape only; whether a URL is reachable or a channel is
  * installed is checked by the collector at scan time.
  */
 import { z } from 'zod';
-import type { BrowserConfig, FlowStep, ProfileConfig, TesseraConfig } from '../types.js';
+import type { BrowserConfig, FlowStep, ProfileConfig, ScriptlockConfig } from '../types.js';
 
 export const DEFAULT_VIEWPORT = { width: 1366, height: 900 } as const;
 export const DEFAULT_TIMEOUT_MS = 30_000;
@@ -77,7 +77,7 @@ const integritySchema = z.strictObject({
   eval: integrityPolicySchema.default('structural'),
 });
 
-/** Profile names become file names (`.tessera/last.<profile>.json`, history directories), so they must be one safe path segment. */
+/** Profile names become file names (`.scriptlock/last.<profile>.json`, history directories), so they must be one safe path segment. */
 export const PROFILE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 const profileNameSchema = z
@@ -97,7 +97,7 @@ const profileSchema = z.strictObject({
 
 /**
  * Schema for the raw (already ${ENV}-interpolated) YAML document. Use
- * `toTesseraConfig` on the parsed output to obtain the contract type.
+ * `toScriptlockConfig` on the parsed output to obtain the contract type.
  */
 export const configSchema = z.strictObject({
   version: z.literal(1),
@@ -139,8 +139,8 @@ function toProfileConfig(p: ConfigSchemaOutput['profiles'][string]): ProfileConf
   };
 }
 
-/** Converts validated schema output into the `TesseraConfig` contract type. */
-export function toTesseraConfig(parsed: ConfigSchemaOutput): TesseraConfig {
+/** Converts validated schema output into the `ScriptlockConfig` contract type. */
+export function toScriptlockConfig(parsed: ConfigSchemaOutput): ScriptlockConfig {
   const profiles: Record<string, ProfileConfig> = {};
   for (const name of Object.keys(parsed.profiles).sort()) {
     const profile = parsed.profiles[name];
@@ -168,7 +168,7 @@ export function toTesseraConfig(parsed: ConfigSchemaOutput): TesseraConfig {
   };
 }
 
-/** The default profile as written by `tessera init`. */
+/** The default profile as written by `scriptlock init`. */
 export function defaultProfile(url: string = DEFAULT_PROFILE_URL): ProfileConfig {
   return {
     url,
@@ -183,8 +183,8 @@ export function defaultProfile(url: string = DEFAULT_PROFILE_URL): ProfileConfig
  * A complete configuration with every default from DESIGN.md section 9 and a
  * single "default" profile pointing at `url`.
  */
-export function defaultConfig(url: string = DEFAULT_PROFILE_URL): TesseraConfig {
-  return toTesseraConfig(configSchema.parse({ version: 1, profiles: { default: { url } } }));
+export function defaultConfig(url: string = DEFAULT_PROFILE_URL): ScriptlockConfig {
+  return toScriptlockConfig(configSchema.parse({ version: 1, profiles: { default: { url } } }));
 }
 
 /** Renders zod issues as "  - path: message" lines for error output. */

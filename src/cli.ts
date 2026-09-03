@@ -1,7 +1,7 @@
 /**
  * Commander entry point (DESIGN.md section 8). Owns argument parsing, the
  * global options (--config, --verbose, --no-color), building the
- * CommandContext for commands/*, TesseraError rendering ("error: <message>"
+ * CommandContext for commands/*, ScriptlockError rendering ("error: <message>"
  * plus an optional hint) and the process exit code: 0 clean, 1 findings,
  * 2 run error (blocked, navigation failure, invalid configuration, missing
  * browser, usage error).
@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { Command, CommanderError, InvalidArgumentError, Option } from 'commander';
 import pc from 'picocolors';
 import { renderPolicyTable } from './diff/policy.js';
-import { isTesseraError } from './errors.js';
+import { isScriptlockError } from './errors.js';
 import { APPROVABLE_SCOPES, INTEGRITY_METHODS, INTEGRITY_POLICIES, runApprove, SCRIPT_CATEGORIES } from './commands/approve.js';
 import { DIFF_FORMATS, runDiff, type DiffFormat } from './commands/diff.js';
 import { runInit } from './commands/init.js';
@@ -71,13 +71,13 @@ function indent(text: string, prefix: string = '  '): string {
 export function buildProgram(state: CliState, io: CliIo, version: string = packageVersion()): Command {
   const program = new Command();
   program
-    .name('tessera')
+    .name('scriptlock')
     .description(
-      'Client-side script inventory and change detection for web pages: records every script a page executes, keeps the approved inventory in tessera.lock.yaml and fails CI when the page diverges from it.',
+      'Client-side script inventory and change detection for web pages: records every script a page executes, keeps the approved inventory in scriptlock.lock.yaml and fails CI when the page diverges from it.',
     )
-    .version(version, '-V, --version', 'print the tessera-cli version')
+    .version(version, '-V, --version', 'print the scriptlock version')
     .helpOption('-h, --help', 'show help')
-    .option('--config <path>', 'configuration file (default: tessera.config.yaml, then tessera.config.yml, in the current directory)')
+    .option('--config <path>', 'configuration file (default: scriptlock.config.yaml, then scriptlock.config.yml, in the current directory)')
     .option('--verbose', 'print progress messages and error details')
     .option('--no-color', 'disable coloured output (NO_COLOR is honoured as well)')
     .addHelpText(
@@ -104,7 +104,7 @@ export function buildProgram(state: CliState, io: CliIo, version: string = packa
 
   program
     .command('init')
-    .description('write tessera.config.yaml with a "default" profile')
+    .description('write scriptlock.config.yaml with a "default" profile')
     .option('--url <url>', 'URL of the default profile', 'https://shop.example.com/checkout')
     .option('--force', 'overwrite an existing configuration file')
     .action(async (options: { url: string; force?: boolean }) => {
@@ -113,10 +113,10 @@ export function buildProgram(state: CliState, io: CliIo, version: string = packa
 
   program
     .command('scan')
-    .description('open the page in Chromium, record every script and header, write .tessera/last.<profile>.json')
+    .description('open the page in Chromium, record every script and header, write .scriptlock/last.<profile>.json')
     .option('--profile <name>', 'profile from the configuration', 'default')
     .option('--runs <n>', 'number of runs unioned into the snapshot (overrides the profile)', parsePositiveInt)
-    .option('--out <file>', 'snapshot path (default: .tessera/last.<profile>.json)')
+    .option('--out <file>', 'snapshot path (default: .scriptlock/last.<profile>.json)')
     .option('--json', 'print the snapshot JSON instead of the summary')
     .action(async (options: { profile: string; runs?: number; out?: string; json?: boolean }) => {
       const outcome = await runScan(context(), { profile: options.profile, runs: options.runs, out: options.out, json: options.json === true });
@@ -131,7 +131,7 @@ export function buildProgram(state: CliState, io: CliIo, version: string = packa
     .addOption(new Option('--drift', 'drift mode for the scheduled run: broader severities').conflicts('gate'))
     .option('--snapshot <file>', 'compare this snapshot instead of scanning')
     .addOption(new Option('--format <format>', 'report format').choices([...DIFF_FORMATS]).default('text'))
-    .option('--history', 'append the snapshot and result under .tessera/history/<profile>/ (also when profile.history is set)')
+    .option('--history', 'append the snapshot and result under .scriptlock/history/<profile>/ (also when profile.history is set)')
     .option('--out <file>', 'write the report to this file instead of standard output')
     .addHelpText('after', `\nSeverity matrix (gate vs drift):\n${indent(renderPolicyTable())}`)
     .action(
@@ -151,7 +151,7 @@ export function buildProgram(state: CliState, io: CliIo, version: string = packa
   program
     .command('approve')
     .description('add or refresh manifest entries from the last snapshot (or --snapshot)')
-    .argument('[ids...]', 'observed script ids to approve (see "tessera scan" output)')
+    .argument('[ids...]', 'observed script ids to approve (see "scriptlock scan" output)')
     .option('--all-new', 'approve every script and cross-origin frame without an entry')
     .option('--owner <owner>', 'team or person responsible (required for new entries)')
     .addOption(new Option('--category <category>', 'script category (required for new entries)').choices([...SCRIPT_CATEGORIES]))
@@ -163,7 +163,7 @@ export function buildProgram(state: CliState, io: CliIo, version: string = packa
     .option('--notes <text>', 'free-form notes stored on the entry')
     .option('--refresh', 'refresh lastSeenSha256 on track entries and the approved hashes of the listed entries')
     .option('--headers', 'record the observed security headers as the approved values')
-    .option('--snapshot <file>', 'snapshot to approve from (default: .tessera/last.<profile>.json)')
+    .option('--snapshot <file>', 'snapshot to approve from (default: .scriptlock/last.<profile>.json)')
     .option('--profile <name>', 'profile from the configuration', 'default')
     .action(
       async (
@@ -208,7 +208,7 @@ export function buildProgram(state: CliState, io: CliIo, version: string = packa
     .description('render the inventory with authorisation status (approved / unapproved / stale) grouped by scope, owner and category')
     .option('--profile <name>', 'profile from the configuration', 'default')
     .addOption(new Option('--format <format>', 'report format').choices([...REPORT_FORMATS]).default('md'))
-    .option('--snapshot <file>', 'snapshot to report on (default: .tessera/last.<profile>.json)')
+    .option('--snapshot <file>', 'snapshot to report on (default: .scriptlock/last.<profile>.json)')
     .option('--out <file>', 'write the report to this file instead of standard output')
     .action(async (options: { profile: string; format: ReportFormat; snapshot?: string; out?: string }) => {
       await runReport(context(), { profile: options.profile, format: options.format, snapshot: options.snapshot, out: options.out });
@@ -232,7 +232,7 @@ export async function main(argv: readonly string[], io: CliIo = defaultIo()): Pr
       if (error.code === 'commander.help') return error.exitCode === 0 ? 0 : 1;
       return 2;
     }
-    if (isTesseraError(error)) {
+    if (isScriptlockError(error)) {
       io.stderr(`error: ${error.message}\n`);
       if (error.hint !== undefined) io.stderr(`hint: ${error.hint}\n`);
       if (verbose && error.cause !== undefined) io.stderr(`cause: ${describeCause(error.cause)}\n`);

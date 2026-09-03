@@ -14,7 +14,7 @@
  * Playwright's error message wording.
  */
 import { chromium, type Browser, type LaunchOptions } from 'playwright-core';
-import { TesseraError } from '../errors.js';
+import { ScriptlockError } from '../errors.js';
 import type { BrowserConfig } from '../types.js';
 
 export interface LaunchedBrowser {
@@ -29,7 +29,7 @@ const INSTALL_HINT = 'npx playwright-core install chromium';
 const CHANNEL_HINT = 'Install that browser on this machine, or set browser.channel to chromium, chrome or msedge (or browser.executablePath to a Chromium-based binary)';
 
 function executablePathHint(executablePath: string): string {
-  return `Check browser.executablePath in tessera.config.yaml (${executablePath} does not exist or cannot be launched), or remove it to use the Playwright-managed build`;
+  return `Check browser.executablePath in scriptlock.config.yaml (${executablePath} does not exist or cannot be launched), or remove it to use the Playwright-managed build`;
 }
 
 function looksLikeUnsupportedChannel(error: unknown): boolean {
@@ -76,14 +76,14 @@ async function tryLaunch(options: LaunchOptions, what: string, hint: string, pre
     return await chromium.launch(options);
   } catch (error) {
     if (looksLikeMissingBrowser(error) || (previous !== undefined && looksLikeMissingBrowser(previous))) {
-      throw new TesseraError('BROWSER_NOT_FOUND', `Chromium browser "${what}" was not found`, {
+      throw new ScriptlockError('BROWSER_NOT_FOUND', `Chromium browser "${what}" was not found`, {
         exitCode: 2,
         hint,
         cause: error,
       });
     }
     if (looksLikeUnsupportedChannel(error)) {
-      throw new TesseraError('BROWSER_NOT_FOUND', `browser channel "${what}" is not supported by playwright-core: ${errorMessage(error)}`, {
+      throw new ScriptlockError('BROWSER_NOT_FOUND', `browser channel "${what}" is not supported by playwright-core: ${errorMessage(error)}`, {
         exitCode: 2,
         hint: CHANNEL_HINT,
         cause: error,

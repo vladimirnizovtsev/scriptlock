@@ -1,8 +1,8 @@
 /**
- * Example flow module for a Tessera profile (`steps: ./examples/checkout-flow.ts`).
+ * Example flow module for a Scriptlock profile (`steps: ./examples/checkout-flow.ts`).
  *
  * The default export receives the Playwright page after `page.goto(profile.url)` and walks
- * to the rendered payment form. Tessera then waits `settleMs` and records what loaded.
+ * to the rendered payment form. Scriptlock then waits `settleMs` and records what loaded.
  * Limitations: selectors are illustrative and must be adapted to your storefront; the
  * module is loaded with tsx (`.ts`) or imported directly (`.js`, `.mjs`); it runs under
  * `browser.timeoutMs` and any thrown error fails the scan with exit code 2.
@@ -21,7 +21,7 @@ export default async function checkoutFlow(page: Page): Promise<void> {
   // Go to checkout and fill the fields that gate the payment step. Use a dedicated
   // scanner account or guest checkout, never a real customer.
   await page.goto(new URL('/checkout', base).toString(), { waitUntil: 'networkidle' });
-  await page.fill('#email', 'tessera-scan@example.com');
+  await page.fill('#email', 'scriptlock-scan@example.com');
   await page.fill('#postal-code', '10115');
 
   // Dismiss a consent banner if one is shown, so consent-gated tags load and are recorded.

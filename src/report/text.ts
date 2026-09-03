@@ -43,7 +43,7 @@ export function renderText(result: DiffResult, opts: TextOptions = {}): string {
   const paint: Record<Severity, (s: string) => string> = { fail: c.red, warn: c.yellow, info: c.cyan };
   const lines: string[] = [];
 
-  lines.push(`${c.bold('tessera diff')} (${result.mode}) ${result.url}`);
+  lines.push(`${c.bold('scriptlock diff')} (${result.mode}) ${result.url}`);
   lines.push(
     c.dim(
       `profile: ${result.profile}, scanned: ${result.scannedAt}, scripts: ${result.summary.totalScripts} (${result.summary.merchantScripts} merchant), approved: ${result.summary.approved}`,

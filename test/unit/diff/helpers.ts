@@ -102,7 +102,7 @@ export function mainFrame(): FrameInfo {
 export function makeSnapshot(overrides: Partial<Snapshot> = {}): Snapshot {
   const base: Snapshot = {
     version: 1,
-    tool: { name: 'tessera', version: '0.0.0-test' },
+    tool: { name: 'scriptlock', version: '0.0.0-test' },
     profile: 'default',
     url: MAIN_URL,
     finalUrl: MAIN_URL,

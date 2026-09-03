@@ -7,8 +7,8 @@ dist/
 coverage/
 
 # Local scan output
-.tessera/history/
-*.tessera-snapshot.json
+.scriptlock/history/
+*.scriptlock-snapshot.json
 
 # OS and editor noise
 .DS_Store

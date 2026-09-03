@@ -3,19 +3,19 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { interpolateEnv, loadConfig, manifestPathFor, parseConfig } from '../../../src/config/load.js';
-import { TesseraError } from '../../../src/errors.js';
+import { ScriptlockError } from '../../../src/errors.js';
 
 const MINIMAL = `version: 1\nprofiles:\n  default:\n    url: https://shop.example.com/checkout\n`;
 
-function expectTesseraError(fn: () => unknown, code: string, messagePart?: string | RegExp): TesseraError {
+function expectScriptlockError(fn: () => unknown, code: string, messagePart?: string | RegExp): ScriptlockError {
   let caught: unknown;
   try {
     fn();
   } catch (error) {
     caught = error;
   }
-  expect(caught).toBeInstanceOf(TesseraError);
-  const err = caught as TesseraError;
+  expect(caught).toBeInstanceOf(ScriptlockError);
+  const err = caught as ScriptlockError;
   expect(err.code).toBe(code);
   if (messagePart !== undefined) expect(err.message).toMatch(messagePart);
   return err;
@@ -36,21 +36,21 @@ describe('env interpolation', () => {
   });
 
   it('names the missing variable and the location', () => {
-    const text = `${MINIMAL}browser:\n  extraHeaders:\n    X-Scanner-Token: \${TESSERA_SCANNER_TOKEN}\n`;
-    const err = expectTesseraError(() => parseConfig(text, { env: {} }), 'CONFIG_INVALID', /TESSERA_SCANNER_TOKEN/);
+    const text = `${MINIMAL}browser:\n  extraHeaders:\n    X-Scanner-Token: \${SCRIPTLOCK_SCANNER_TOKEN}\n`;
+    const err = expectScriptlockError(() => parseConfig(text, { env: {} }), 'CONFIG_INVALID', /SCRIPTLOCK_SCANNER_TOKEN/);
     expect(err.message).toContain('browser.extraHeaders.X-Scanner-Token');
     expect(err.exitCode).toBe(2);
-    expect(err.hint).toContain('TESSERA_SCANNER_TOKEN');
+    expect(err.hint).toContain('SCRIPTLOCK_SCANNER_TOKEN');
   });
 
   it('substitutes from the given environment before validation', () => {
-    const text = `${MINIMAL}browser:\n  extraHeaders:\n    X-Scanner-Token: \${TESSERA_SCANNER_TOKEN}\n`;
-    const config = parseConfig(text, { env: { TESSERA_SCANNER_TOKEN: 'secret' } });
+    const text = `${MINIMAL}browser:\n  extraHeaders:\n    X-Scanner-Token: \${SCRIPTLOCK_SCANNER_TOKEN}\n`;
+    const config = parseConfig(text, { env: { SCRIPTLOCK_SCANNER_TOKEN: 'secret' } });
     expect(config.browser.extraHeaders).toEqual({ 'X-Scanner-Token': 'secret' });
   });
 
   it('uses process.env by default', () => {
-    const key = 'TESSERA_TEST_INTERPOLATION_VAR';
+    const key = 'SCRIPTLOCK_TEST_INTERPOLATION_VAR';
     process.env[key] = 'https://from-env.example.com/';
     try {
       const config = parseConfig(`version: 1\nprofiles:\n  default:\n    url: \${${key}}\n`);
@@ -64,32 +64,32 @@ describe('env interpolation', () => {
 describe('invalid configuration messages', () => {
   it('reports the YAML path and reason for schema violations', () => {
     const text = `version: 1\nbrowser:\n  timeoutMs: soon\nprofiles:\n  default:\n    url: https://shop.example.com/\n    wait: whenever\n`;
-    const err = expectTesseraError(() => parseConfig(text, { path: 'tessera.config.yaml' }), 'CONFIG_INVALID');
-    expect(err.message).toContain('Invalid configuration in tessera.config.yaml');
+    const err = expectScriptlockError(() => parseConfig(text, { path: 'scriptlock.config.yaml' }), 'CONFIG_INVALID');
+    expect(err.message).toContain('Invalid configuration in scriptlock.config.yaml');
     expect(err.message).toContain('browser.timeoutMs');
     expect(err.message).toContain('profiles.default.wait');
   });
 
   it('reports unknown keys', () => {
-    const err = expectTesseraError(() => parseConfig(`${MINIMAL}identitty: {}\n`), 'CONFIG_INVALID');
+    const err = expectScriptlockError(() => parseConfig(`${MINIMAL}identitty: {}\n`), 'CONFIG_INVALID');
     expect(err.message).toMatch(/identitty/);
   });
 
   it('reports malformed YAML, empty files and non-mapping documents', () => {
-    expectTesseraError(() => parseConfig('version: [1', { path: 'x.yaml' }), 'CONFIG_INVALID', /Invalid YAML in x.yaml/);
-    expectTesseraError(() => parseConfig('', { path: 'x.yaml' }), 'CONFIG_INVALID', /empty/);
-    expectTesseraError(() => parseConfig('- 1\n- 2\n'), 'CONFIG_INVALID', /mapping/);
+    expectScriptlockError(() => parseConfig('version: [1', { path: 'x.yaml' }), 'CONFIG_INVALID', /Invalid YAML in x.yaml/);
+    expectScriptlockError(() => parseConfig('', { path: 'x.yaml' }), 'CONFIG_INVALID', /empty/);
+    expectScriptlockError(() => parseConfig('- 1\n- 2\n'), 'CONFIG_INVALID', /mapping/);
   });
 
   it('reports a wrong version', () => {
-    expectTesseraError(() => parseConfig('version: 2\nprofiles: {}\n'), 'CONFIG_INVALID', /version/);
+    expectScriptlockError(() => parseConfig('version: 2\nprofiles: {}\n'), 'CONFIG_INVALID', /version/);
   });
 });
 
 describe('loadConfig', () => {
   let dir: string;
   beforeEach(async () => {
-    dir = await mkdtemp(path.join(os.tmpdir(), 'tessera-config-'));
+    dir = await mkdtemp(path.join(os.tmpdir(), 'scriptlock-config-'));
   });
   afterEach(async () => {
     await rm(dir, { recursive: true, force: true });
@@ -98,22 +98,22 @@ describe('loadConfig', () => {
   it('throws CONFIG_NOT_FOUND with an init hint when nothing exists', async () => {
     await expect(loadConfig(dir)).rejects.toMatchObject({
       code: 'CONFIG_NOT_FOUND',
-      hint: expect.stringContaining('tessera init'),
+      hint: expect.stringContaining('scriptlock init'),
     });
   });
 
-  it('finds tessera.config.yml when .yaml is absent', async () => {
-    await writeFile(path.join(dir, 'tessera.config.yml'), MINIMAL);
+  it('finds scriptlock.config.yml when .yaml is absent', async () => {
+    await writeFile(path.join(dir, 'scriptlock.config.yml'), MINIMAL);
     const { config, path: found } = await loadConfig(dir);
-    expect(found).toBe(path.join(dir, 'tessera.config.yml'));
+    expect(found).toBe(path.join(dir, 'scriptlock.config.yml'));
     expect(config.profiles['default']?.url).toBe('https://shop.example.com/checkout');
   });
 
-  it('prefers tessera.config.yaml over .yml', async () => {
-    await writeFile(path.join(dir, 'tessera.config.yml'), MINIMAL.replace('checkout', 'yml'));
-    await writeFile(path.join(dir, 'tessera.config.yaml'), MINIMAL.replace('checkout', 'yaml'));
+  it('prefers scriptlock.config.yaml over .yml', async () => {
+    await writeFile(path.join(dir, 'scriptlock.config.yml'), MINIMAL.replace('checkout', 'yml'));
+    await writeFile(path.join(dir, 'scriptlock.config.yaml'), MINIMAL.replace('checkout', 'yaml'));
     const { config, path: found } = await loadConfig(dir);
-    expect(found).toBe(path.join(dir, 'tessera.config.yaml'));
+    expect(found).toBe(path.join(dir, 'scriptlock.config.yaml'));
     expect(config.profiles['default']?.url).toBe('https://shop.example.com/yaml');
   });
 
@@ -126,21 +126,21 @@ describe('loadConfig', () => {
   });
 
   it('surfaces validation errors with the file path', async () => {
-    await writeFile(path.join(dir, 'tessera.config.yaml'), 'version: 1\nprofiles:\n  default:\n    url: 42\n');
+    await writeFile(path.join(dir, 'scriptlock.config.yaml'), 'version: 1\nprofiles:\n  default:\n    url: 42\n');
     await expect(loadConfig(dir)).rejects.toMatchObject({
       code: 'CONFIG_INVALID',
-      message: expect.stringContaining(path.join(dir, 'tessera.config.yaml')),
+      message: expect.stringContaining(path.join(dir, 'scriptlock.config.yaml')),
     });
   });
 });
 
 describe('manifestPathFor', () => {
   const cwd = path.resolve('/work/site');
-  it('uses tessera.lock.yaml for the default profile', () => {
-    expect(manifestPathFor('default', {}, cwd)).toBe(path.join(cwd, 'tessera.lock.yaml'));
+  it('uses scriptlock.lock.yaml for the default profile', () => {
+    expect(manifestPathFor('default', {}, cwd)).toBe(path.join(cwd, 'scriptlock.lock.yaml'));
   });
-  it('uses tessera.<profile>.lock.yaml for other profiles', () => {
-    expect(manifestPathFor('checkout', {}, cwd)).toBe(path.join(cwd, 'tessera.checkout.lock.yaml'));
+  it('uses scriptlock.<profile>.lock.yaml for other profiles', () => {
+    expect(manifestPathFor('checkout', {}, cwd)).toBe(path.join(cwd, 'scriptlock.checkout.lock.yaml'));
   });
   it('honours profile.manifest, relative to cwd or absolute', () => {
     expect(manifestPathFor('checkout', { manifest: 'locks/co.yaml' }, cwd)).toBe(path.join(cwd, 'locks', 'co.yaml'));

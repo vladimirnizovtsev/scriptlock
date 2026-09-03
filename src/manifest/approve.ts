@@ -1,5 +1,5 @@
 /**
- * Adding and refreshing manifest entries from a snapshot (`tessera approve`).
+ * Adding and refreshing manifest entries from a snapshot (`scriptlock approve`).
  *
  * Owns: `approveScripts()`, `approveFrames()`, `refreshTracked()`,
  * `refreshScripts()`, `ApproveMeta`, `ApproveFrameMeta`, `ApproveHelpers`.
@@ -13,7 +13,7 @@
  * main frame, falling back to `finalUrl`; a snapshot without either cannot
  * classify parties and treats everything as third-party.
  */
-import { TesseraError } from '../errors.js';
+import { ScriptlockError } from '../errors.js';
 import { isFirstParty as identityIsFirstParty } from '../identity/identity.js';
 import type {
   FrameInfo,
@@ -92,7 +92,7 @@ export function defaultIntegrityMethod(policy: IntegrityPolicy): IntegrityMethod
  * True when a script's body was never read, so no body hash exists: worker
  * entries (v1 records the URL only) and any observation missing a sha256.
  * Such entries can only be url-only; strict/structural would claim enforcement
- * of a body Tessera never saw.
+ * of a body Scriptlock never saw.
  */
 export function bodyNotCaptured(observed: Pick<ObservedScript, 'kind' | 'sha256'>): boolean {
   return observed.kind === 'worker' || observed.sha256 === undefined;
@@ -120,7 +120,7 @@ function requireMeta(id: string, meta: ApproveMeta): { owner: string; category: 
   if (meta.category === undefined) missing.push('category');
   if (meta.justification === undefined || meta.justification === '') missing.push('justification');
   if (missing.length > 0) {
-    throw new TesseraError('UNSUPPORTED', `Approving new script ${id} requires ${missing.join(', ')}`, {
+    throw new ScriptlockError('UNSUPPORTED', `Approving new script ${id} requires ${missing.join(', ')}`, {
       hint: 'Pass --owner, --category and --justification',
     });
   }
@@ -144,10 +144,10 @@ function resolveScriptIds(manifest: Manifest, snapshot: Snapshot, ids: readonly 
     }
     const script = byId.get(id);
     if (script === undefined) {
-      throw new TesseraError(
+      throw new ScriptlockError(
         'SNAPSHOT_INVALID',
         `Script ${id} was not observed in the snapshot for profile ${snapshot.profile} (${snapshot.scripts.length} scripts recorded)`,
-        { hint: 'Check the id against "tessera scan" output, or use --all-new to approve every unapproved script' },
+        { hint: 'Check the id against "scriptlock scan" output, or use --all-new to approve every unapproved script' },
       );
     }
     selected.set(script.id, script);
@@ -157,7 +157,7 @@ function resolveScriptIds(manifest: Manifest, snapshot: Snapshot, ids: readonly 
 
 function assertHashable(id: string, meta: ApproveMeta, notCaptured: boolean): void {
   if (notCaptured && (meta.integrity === 'strict' || meta.integrity === 'structural')) {
-    throw new TesseraError(
+    throw new ScriptlockError(
       'UNSUPPORTED',
       `Cannot apply ${meta.integrity} integrity to ${id}: its body was not captured (worker entries record the URL only)`,
       { hint: 'Approve it with --integrity url-only, or omit --integrity to use the default' },
@@ -261,8 +261,8 @@ function resolveFrames(manifest: Manifest, snapshot: Snapshot, matches: readonly
     }
     const frame = snapshot.frames.find((candidate) => candidate.url === match) ?? findFrameByGlob(candidates, match);
     if (frame === undefined) {
-      throw new TesseraError('SNAPSHOT_INVALID', `Frame ${match} was not observed in the snapshot for profile ${snapshot.profile}`, {
-        hint: 'Check the frame URL against "tessera scan" output',
+      throw new ScriptlockError('SNAPSHOT_INVALID', `Frame ${match} was not observed in the snapshot for profile ${snapshot.profile}`, {
+        hint: 'Check the frame URL against "scriptlock scan" output',
       });
     }
     selected.set(match, frame);
@@ -305,7 +305,7 @@ export function approveFrames(manifest: Manifest, snapshot: Snapshot, matches: r
       if (meta.owner === undefined || meta.owner === '') missing.push('owner');
       if (meta.justification === undefined || meta.justification === '') missing.push('justification');
       if (missing.length > 0) {
-        throw new TesseraError('UNSUPPORTED', `Approving new frame ${match} requires ${missing.join(', ')}`, {
+        throw new ScriptlockError('UNSUPPORTED', `Approving new frame ${match} requires ${missing.join(', ')}`, {
           hint: 'Pass --owner and --justification',
         });
       }
@@ -387,12 +387,12 @@ export function refreshScripts(
     }
     const entry = manifest.scripts.find((candidate) => candidate.id === id) ?? findScriptEntry(manifest, { id });
     if (entry === undefined) {
-      throw new TesseraError('SNAPSHOT_INVALID', `Script ${id} has no manifest entry to refresh`, {
-        hint: 'Use "tessera approve" to add it first',
+      throw new ScriptlockError('SNAPSHOT_INVALID', `Script ${id} has no manifest entry to refresh`, {
+        hint: 'Use "scriptlock approve" to add it first',
       });
     }
     if (!observedFor.has(entry)) {
-      throw new TesseraError('SNAPSHOT_INVALID', `Script ${id} was not observed in the snapshot for profile ${snapshot.profile}`);
+      throw new ScriptlockError('SNAPSHOT_INVALID', `Script ${id} was not observed in the snapshot for profile ${snapshot.profile}`);
     }
     targets.add(entry);
   }

@@ -1,5 +1,5 @@
 /**
- * `tessera report` (DESIGN.md section 8): render the inventory of the last
+ * `scriptlock report` (DESIGN.md section 8): render the inventory of the last
  * snapshot (or `--snapshot`) with its authorisation status against the
  * manifest (approved / unapproved / stale), grouped by scope, then owner and
  * category, as markdown (report/markdown.ts) or JSON (`renderInventoryJson`
@@ -12,7 +12,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { manifestPathFor } from '../config/load.js';
-import { isTesseraError } from '../errors.js';
+import { isScriptlockError } from '../errors.js';
 import { emptyManifest, readManifest } from '../manifest/io.js';
 import { findFrameEntry, findScriptEntry } from '../manifest/match.js';
 import { integrityLabel, inventoryStatus, renderInventoryMarkdown, type InventoryStatus } from '../report/markdown.js';
@@ -33,7 +33,7 @@ export const REPORT_FORMATS: readonly ReportFormat[] = ['md', 'json'];
 export interface ReportCommandOptions {
   profile: string;
   format?: ReportFormat | undefined;
-  /** Snapshot file (relative to cwd) instead of `.tessera/last.<profile>.json`. */
+  /** Snapshot file (relative to cwd) instead of `.scriptlock/last.<profile>.json`. */
   snapshot?: string | undefined;
   /** Write the report to this file (relative to cwd) instead of standard output. */
   out?: string | undefined;
@@ -191,7 +191,7 @@ export async function runReport(ctx: CommandContext, opts: ReportCommandOptions)
   try {
     manifest = await readManifest(manifestPath);
   } catch (error) {
-    if (!isTesseraError(error) || error.code !== 'MANIFEST_NOT_FOUND') throw error;
+    if (!isScriptlockError(error) || error.code !== 'MANIFEST_NOT_FOUND') throw error;
     manifest = emptyManifest(opts.profile, loaded.profile.url);
     manifestMissing = true;
     ctx.err(`warning: no manifest found at ${manifestPath}; every script is reported as unapproved`);

@@ -1,5 +1,5 @@
 /**
- * Reading and writing tessera.lock.yaml.
+ * Reading and writing scriptlock.lock.yaml.
  *
  * Owns: `readManifest()`, `writeManifest()`, `parseManifest()`,
  * `serialiseManifest()`, `sortManifest()`, `emptyManifest()`.
@@ -16,7 +16,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import YAML from 'yaml';
-import { TesseraError } from '../errors.js';
+import { ScriptlockError } from '../errors.js';
 import {
   SECURITY_HEADER_NAMES,
   type Manifest,
@@ -139,17 +139,17 @@ export function parseManifest(text: string, where: string = 'manifest'): Manifes
     raw = YAML.parse(text);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    throw new TesseraError('MANIFEST_INVALID', `Invalid YAML in ${where}: ${detail}`, { cause: error });
+    throw new ScriptlockError('MANIFEST_INVALID', `Invalid YAML in ${where}: ${detail}`, { cause: error });
   }
   if (raw === null || raw === undefined) {
-    throw new TesseraError('MANIFEST_INVALID', `Manifest ${where} is empty`);
+    throw new ScriptlockError('MANIFEST_INVALID', `Manifest ${where} is empty`);
   }
   if (typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new TesseraError('MANIFEST_INVALID', `Manifest ${where} must be a YAML mapping`);
+    throw new ScriptlockError('MANIFEST_INVALID', `Manifest ${where} must be a YAML mapping`);
   }
   const result = manifestSchema.safeParse(raw);
   if (!result.success) {
-    throw new TesseraError('MANIFEST_INVALID', `Invalid manifest ${where}:\n${formatManifestIssues(result.error.issues)}`);
+    throw new ScriptlockError('MANIFEST_INVALID', `Invalid manifest ${where}:\n${formatManifestIssues(result.error.issues)}`);
   }
   return toManifest(result.data);
 }
@@ -161,9 +161,9 @@ export async function readManifest(file: string): Promise<Manifest> {
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ENOENT' || code === 'ENOTDIR') {
-      throw new TesseraError('MANIFEST_NOT_FOUND', `Manifest not found: ${file}`, {
+      throw new ScriptlockError('MANIFEST_NOT_FOUND', `Manifest not found: ${file}`, {
         exitCode: 1,
-        hint: 'Run "tessera scan" and then "tessera approve --all-new" to create it',
+        hint: 'Run "scriptlock scan" and then "scriptlock approve --all-new" to create it',
         cause: error,
       });
     }

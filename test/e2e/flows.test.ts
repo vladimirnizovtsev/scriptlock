@@ -55,14 +55,14 @@ function entry(scripts: ManifestScript[], id: string): ManifestScript {
 
 beforeAll(async () => {
   server = await start();
-  dir = mkdtempSync(join(tmpdir(), 'tessera-flows-'));
+  dir = mkdtempSync(join(tmpdir(), 'scriptlock-flows-'));
   appId = `${server.origin}/app.[hash].js`;
   vendorId = `${server.origin}/vendor.js`;
   extraId = `${server.origin}/extra.js`;
   frameExtraId = `${server.crossOrigin}/frame-extra.js`;
   lastPath = lastSnapshotPath(dir, 'default');
   writeFileSync(
-    join(dir, 'tessera.config.yaml'),
+    join(dir, 'scriptlock.config.yaml'),
     [
       'version: 1',
       'browser:',
@@ -89,7 +89,7 @@ afterAll(async () => {
 });
 
 describe('scan, approve and diff flows', () => {
-  it('scan writes .tessera/last.default.json without source text and prints a summary', async () => {
+  it('scan writes .scriptlock/last.default.json without source text and prints a summary', async () => {
     const { snapshot, path } = await runScan(ctx(), { profile: 'default' });
     expect(path).toBe(lastPath);
     expect(existsSync(lastPath)).toBe(true);
@@ -112,10 +112,10 @@ describe('scan, approve and diff flows', () => {
     const outcome = await runDiff(ctx(), { profile: 'default', mode: 'gate', snapshot: lastPath });
     expect(outcome.exitCode).toBe(1);
     expect(outcome.result).toBeUndefined();
-    expect(outcome.manifestPath).toBe(join(dir, 'tessera.lock.yaml'));
+    expect(outcome.manifestPath).toBe(join(dir, 'scriptlock.lock.yaml'));
     const text = stderr.join('\n');
     expect(text).toContain('no manifest found');
-    expect(text).toContain('tessera approve --all-new');
+    expect(text).toContain('scriptlock approve --all-new');
     expect(existsSync(outcome.manifestPath)).toBe(false);
   });
 
@@ -128,7 +128,7 @@ describe('scan, approve and diff flows', () => {
     expect(outcome.framesAdded).toEqual([`${server.crossOrigin}/frame-cross.html`]);
     expect(stdout.join('\n')).toContain('manifest: ');
 
-    const manifest = await readManifest(join(dir, 'tessera.lock.yaml'));
+    const manifest = await readManifest(join(dir, 'scriptlock.lock.yaml'));
     expect(manifest.profile).toBe('default');
     expect(manifest.url).toBe(`${server.origin}/`);
     expect(manifest.headers.policy).toBe('strict');
@@ -308,8 +308,8 @@ describe('scan, approve and diff flows', () => {
     expect(outcome.exitCode).toBe(0);
     expect(outcome.historyPath).toBeDefined();
     expect(existsSync(outcome.historyPath ?? '')).toBe(true);
-    expect(outcome.historyPath).toContain(join(dir, '.tessera', 'history', 'default'));
-    const index = readFileSync(join(dir, '.tessera', 'history', 'default', 'index.jsonl'), 'utf8').trim().split('\n');
+    expect(outcome.historyPath).toContain(join(dir, '.scriptlock', 'history', 'default'));
+    const index = readFileSync(join(dir, '.scriptlock', 'history', 'default', 'index.jsonl'), 'utf8').trim().split('\n');
     expect(index).toHaveLength(1);
     expect(JSON.parse(index[0] ?? '')).toMatchObject({ exitCode: 0, fail: 0, blocked: false, url: `${server.origin}/` });
   });
@@ -329,7 +329,7 @@ describe('scan, approve and diff flows', () => {
   it('report renders the inventory as markdown and JSON with authorisation status', async () => {
     const md = await runReport(ctx(), { profile: 'default', format: 'md' });
     expect(md.manifestMissing).toBe(false);
-    expect(md.report).toContain('## Tessera inventory: default');
+    expect(md.report).toContain('## Scriptlock inventory: default');
     expect(md.report).toContain('### Scope: merchant');
     expect(md.report).toContain('### Scope: tpsp');
     expect(md.report).toContain('Owner / category: web / functional');

@@ -9,7 +9,7 @@ import { fakeNormalizeUrl, hex, makeManifest, makeScript, makeSnapshot } from '.
 describe('appendHistory', () => {
   let dir = '';
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'tessera-history-'));
+    dir = await mkdtemp(join(tmpdir(), 'scriptlock-history-'));
   });
   afterEach(async () => {
     await rm(dir, { recursive: true, force: true });

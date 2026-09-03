@@ -8,7 +8,7 @@
  * Limitations: third-party-web is a CommonJS module and is imported through
  * its default export. Lookup is by host only; the category is the dataset's
  * own label (for example "tag-manager", "analytics", "utility") and is not
- * mapped onto Tessera's ScriptCategory.
+ * mapped onto Scriptlock's ScriptCategory.
  */
 import thirdPartyWeb from 'third-party-web';
 import type { ScriptEntity } from '../types.js';

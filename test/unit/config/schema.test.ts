@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { configSchema, defaultConfig, toTesseraConfig } from '../../../src/config/schema.js';
+import { configSchema, defaultConfig, toScriptlockConfig } from '../../../src/config/schema.js';
 
 describe('config defaults', () => {
   it('defaultConfig() carries every default from DESIGN.md section 9', () => {
@@ -30,7 +30,7 @@ describe('config defaults', () => {
       integrity: { thirdParty: 'strict' },
       profiles: { checkout: { url: 'https://shop.example.com/', runs: 2 } },
     });
-    const config = toTesseraConfig(parsed);
+    const config = toScriptlockConfig(parsed);
     expect(config.browser.headless).toBe(false);
     expect(config.browser.channel).toBe('chromium');
     expect(config.browser.viewport).toEqual({ width: 1366, height: 900 });
@@ -65,7 +65,7 @@ describe('config defaults', () => {
         },
       },
     });
-    const config = toTesseraConfig(parsed);
+    const config = toScriptlockConfig(parsed);
     expect(config.browser.executablePath).toBe('/opt/chrome');
     expect(config.browser.extraHeaders).toEqual({ 'X-Token': 'abc' });
     expect(config.browser.locale).toBe('en-GB');

@@ -37,7 +37,7 @@ describe('renderMarkdown', () => {
       normalizeUrl: fakeNormalizeUrl,
     });
     const md = renderMarkdown(result);
-    expect(md).toContain('## Tessera diff: default (gate)');
+    expect(md).toContain('## Scriptlock diff: default (gate)');
     expect(md).toContain('**Result: 1 fail, 0 warn, 2 info; exit code 1 (findings at fail severity).**');
     expect(md).toContain('| Type | Severity | Scope | Subject | Message |');
     expect(md).toContain(`| changed | fail | merchant | \`${APP_ID}\` |`);
@@ -86,7 +86,7 @@ describe('renderInventoryMarkdown', () => {
 
   it('groups by scope then owner/category with status and integrity columns', () => {
     const md = renderInventoryMarkdown(snapshot, manifest);
-    expect(md).toContain('## Tessera inventory: default');
+    expect(md).toContain('## Scriptlock inventory: default');
     expect(md).toContain('Scripts: 5 observed, 2 approved, 2 unapproved, 1 stale');
     expect(md).toContain('### Scope: merchant (4 scripts)');
     expect(md).toContain('### Scope: tpsp (1 script)');

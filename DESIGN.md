@@ -1,10 +1,10 @@
-# Tessera design
+# Scriptlock design
 
 This document is the engineering contract for version 1. It defines module boundaries, the identity and integrity model, diff semantics and the CLI surface. `src/types.ts` is the typed form of the same contract; when the two disagree, fix both.
 
 ## 1. Goal and non-goals
 
-Tessera is a CLI that opens a page in a real Chromium, records every script the JavaScript engine parsed (static, dynamic, inline, eval, blob, inside iframes), writes the result to a manifest that lives in git, and fails CI when the page diverges from the manifest. It also records security-impacting HTTP headers of the main document and diffs them.
+Scriptlock is a CLI that opens a page in a real Chromium, records every script the JavaScript engine parsed (static, dynamic, inline, eval, blob, inside iframes), writes the result to a manifest that lives in git, and fails CI when the page diverges from the manifest. It also records security-impacting HTTP headers of the main document and diffs them.
 
 Version 1 does **not** include: an in-page runtime agent, alerting integrations beyond CI, a web UI, a history store beyond flat JSON files, behavioural analysis, CSP generation, or a hosted scanning service.
 
@@ -18,13 +18,13 @@ src/
   index.ts                    public API re-exports
   cli.ts                      commander entry point; delegates to commands/*
   commands/
-    init.ts                   `tessera init`
-    scan.ts                   `tessera scan`
-    diff.ts                   `tessera diff`
-    approve.ts                `tessera approve`
-    report.ts                 `tessera report`
+    init.ts                   `scriptlock init`
+    scan.ts                   `scriptlock scan`
+    diff.ts                   `scriptlock diff`
+    approve.ts                `scriptlock approve`
+    report.ts                 `scriptlock report`
   config/
-    schema.ts                 zod schema + defaults for tessera.config.yaml
+    schema.ts                 zod schema + defaults for scriptlock.config.yaml
     load.ts                   locate, parse, validate, interpolate ${ENV}
   collector/
     browser.ts                launch Chromium via playwright-core (channel / executablePath)
@@ -41,7 +41,7 @@ src/
     entity.ts                 third-party-web lookup
     hash.ts                   sha256 helpers
   manifest/
-    schema.ts                 zod schema for tessera.lock.yaml
+    schema.ts                 zod schema for scriptlock.lock.yaml
     io.ts                     read / write with stable key order and sorted entries
     match.ts                  find the manifest entry for an observed script or frame
     approve.ts                add or refresh entries from a snapshot
@@ -53,7 +53,7 @@ src/
     markdown.ts               markdown for PR comments and step summaries
     json.ts                   machine output
   history/
-    store.ts                  append snapshot + diff under .tessera/history/<profile>/
+    store.ts                  append snapshot + diff under .scriptlock/history/<profile>/
 fixtures/
   site/                       static test site (see section 10)
   server.ts                   two-origin fixture server used by e2e tests
@@ -68,8 +68,8 @@ Public functions (signatures are illustrative; keep names):
 
 ```ts
 // config
-loadConfig(cwd: string, explicitPath?: string): Promise<{ config: TesseraConfig; path: string }>
-defaultConfig(): TesseraConfig
+loadConfig(cwd: string, explicitPath?: string): Promise<{ config: ScriptlockConfig; path: string }>
+defaultConfig(): ScriptlockConfig
 
 // collector
 scan(options: ScanOptions): Promise<Snapshot>
@@ -109,7 +109,7 @@ appendHistory(dir: string, profile: string, snapshot: Snapshot, result?: DiffRes
 
 ### 3.1 Browser
 
-`playwright-core` only; no bundled browser. Resolution order: `browser.executablePath`, then `browser.channel` (default `chromium`, which uses the Playwright-managed build; CI installs it with the CLI's own bundled `playwright-core`, see `action.yml`). The user agent is left as the browser reports it unless overridden; Tessera never applies stealth patches. `browser.extraHeaders` is the documented allowlisting mechanism for bot management. The header values are sent only to the profile host, its subdomains and any host in `browser.extraHeadersHosts` (a glob list; `*` means every host); requests to every other host, including third-party script hosts and provider iframes, are sent without them, so a bot-management token is not disclosed to third parties. Even so, keep the token low-privilege and scoped to the scanner.
+`playwright-core` only; no bundled browser. Resolution order: `browser.executablePath`, then `browser.channel` (default `chromium`, which uses the Playwright-managed build; CI installs it with the CLI's own bundled `playwright-core`, see `action.yml`). The user agent is left as the browser reports it unless overridden; Scriptlock never applies stealth patches. `browser.extraHeaders` is the documented allowlisting mechanism for bot management. The header values are sent only to the profile host, its subdomains and any host in `browser.extraHeadersHosts` (a glob list; `*` means every host); requests to every other host, including third-party script hosts and provider iframes, are sent without them, so a bot-management token is not disclosed to third parties. Even so, keep the token low-privilege and scoped to the scanner.
 
 ### 3.2 CDP wiring
 
@@ -199,7 +199,7 @@ Scripts inherit the scope of their frame. Harness detection (section 3.2) overri
 
 ## 6. Manifest
 
-File: `tessera.lock.yaml` for profile `default`, otherwise `tessera.<profile>.lock.yaml`, unless `profile.manifest` overrides. Written with stable key order (as declared in `types.ts`) and entries sorted by `scope`, then `id`, so diffs in pull requests are readable.
+File: `scriptlock.lock.yaml` for profile `default`, otherwise `scriptlock.<profile>.lock.yaml`, unless `profile.manifest` overrides. Written with stable key order (as declared in `types.ts`) and entries sorted by `scope`, then `id`, so diffs in pull requests are readable.
 
 ```yaml
 version: 1
@@ -287,18 +287,18 @@ Severity aggregation: `exitCode` is 2 if any `blocked`, else 1 if any `fail`, el
 ## 8. CLI
 
 ```
-tessera init   [--url <url>] [--force]         write tessera.config.yaml with a "default" profile
-tessera scan   [--profile <name>] [--runs N] [--out <file>] [--config <path>] [--json]
-tessera diff   [--profile <name>] [--gate|--drift] [--snapshot <file>] [--format text|md|json]
+scriptlock init   [--url <url>] [--force]         write scriptlock.config.yaml with a "default" profile
+scriptlock scan   [--profile <name>] [--runs N] [--out <file>] [--config <path>] [--json]
+scriptlock diff   [--profile <name>] [--gate|--drift] [--snapshot <file>] [--format text|md|json]
                [--history] [--config <path>] [--out <file>]
-tessera approve <id...> [--all-new] --owner <s> --category <c> --justification <s>
+scriptlock approve <id...> [--all-new] --owner <s> --category <c> --justification <s>
                [--integrity strict|structural|track|url-only] [--integrity-method <m>]
                [--approved-by <s>] [--scope <s>] [--notes <s>] [--refresh] [--headers]
                [--snapshot <file>] [--profile <name>]
-tessera report [--profile <name>] [--format md|json] [--snapshot <file>] [--out <file>]
+scriptlock report [--profile <name>] [--format md|json] [--snapshot <file>] [--out <file>]
 ```
 
-- `scan` writes `.tessera/last.<profile>.json` (path printed) unless `--out`, and prints a summary table: scripts by scope and kind, third-party hosts, initiator tree depth, headers present.
+- `scan` writes `.scriptlock/last.<profile>.json` (path printed) unless `--out`, and prints a summary table: scripts by scope and kind, third-party hosts, initiator tree depth, headers present.
 - `diff` runs a scan unless `--snapshot` is given, compares to the manifest, prints the report, writes history when `--history` or `profile.history`, exits with `result.exitCode`. When no manifest exists it prints instructions to run `approve --all-new` and exits 1.
 - `approve` reads the last snapshot (or `--snapshot`), adds entries, writes the manifest. `--all-new` approves every script without an entry. `--refresh` updates `lastSeenSha256` on track entries and `sha256`/`structuralHash` on strict/structural entries listed. `--approved-by` defaults to `git config user.name` or `$USER`. `approvedAt` is today (UTC date).
 - `report` renders the inventory with authorisation status (approved / unapproved / stale) grouped by scope, owner and category, as markdown or JSON.
@@ -314,7 +314,7 @@ browser:
   viewport: { width: 1366, height: 900 }
   timeoutMs: 30000
   extraHeaders:
-    X-Scanner-Token: ${TESSERA_SCANNER_TOKEN}
+    X-Scanner-Token: ${SCRIPTLOCK_SCANNER_TOKEN}
 identity:
   stripQuery: []
   keepQuery: []
@@ -336,7 +336,7 @@ profiles:
     history: false
 ```
 
-`${VAR}` in string values is replaced from `process.env`; a missing variable is a config error naming the variable. `loadConfig` searches `tessera.config.yaml`, then `tessera.config.yml`, in `cwd`.
+`${VAR}` in string values is replaced from `process.env`; a missing variable is a config error naming the variable. `loadConfig` searches `scriptlock.config.yaml`, then `scriptlock.config.yml`, in `cwd`.
 
 ## 10. Fixture site and tests
 
@@ -360,7 +360,7 @@ E2E tests cover: scan captures every script kind listed above with correct scope
 ## 11. Conventions
 
 - TypeScript strict, ESM, Node 20+. No default exports except for user flow modules.
-- Errors thrown to the CLI are `TesseraError` with a `code` and an `exitCode`; the CLI prints `error: <message>` and exits accordingly.
+- Errors thrown to the CLI are `ScriptlockError` with a `code` and an `exitCode`; the CLI prints `error: <message>` and exits accordingly.
 - No network access in unit tests. E2E tests use only the fixture server.
 - Every module file starts with a short comment stating what it owns and its known limitations.
 - English everywhere: code, comments, docs, commit messages.

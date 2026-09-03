@@ -1,5 +1,5 @@
 /**
- * Public API of tessera-cli (DESIGN.md section 2): re-exports the shared
+ * Public API of scriptlock (DESIGN.md section 2): re-exports the shared
  * types, the error type and the module functions so the package can be used
  * as a library. The CLI entry point (src/cli.ts) is deliberately not exported
  * because it runs on import.
@@ -9,7 +9,7 @@
  * are still resolved by the collector against process.cwd().
  */
 export * from './types.js';
-export { TesseraError, isTesseraError, type TesseraErrorCode } from './errors.js';
+export { ScriptlockError, isScriptlockError, type ScriptlockErrorCode } from './errors.js';
 
 // config
 export { loadConfig, parseConfig, interpolateEnv, manifestPathFor, CONFIG_FILE_NAMES, type ParseConfigOptions } from './config/load.js';
@@ -18,7 +18,7 @@ export {
   defaultConfig,
   defaultProfile,
   formatConfigIssues,
-  toTesseraConfig,
+  toScriptlockConfig,
   DEFAULT_PROFILE_URL,
   DEFAULT_SETTLE_MS,
   DEFAULT_TIMEOUT_MS,

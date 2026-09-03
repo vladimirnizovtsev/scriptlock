@@ -1,5 +1,5 @@
 /**
- * Shared domain types for Tessera.
+ * Shared domain types for Scriptlock.
  *
  * This file is the contract between modules. Keep it dependency-free
  * (no imports from other project modules) so every module can import it
@@ -67,7 +67,7 @@ export interface ScriptInitiator {
   type: 'parser' | 'script' | 'other';
   /** URL of the document or script that caused the load, when known. */
   url?: string;
-  /** Tessera id of the initiating script, when it can be resolved. */
+  /** Scriptlock id of the initiating script, when it can be resolved. */
   scriptId?: string;
   /** Top frames of the stack trace, most recent first, as "url:line:col". */
   stack?: string[];
@@ -124,7 +124,7 @@ export interface ObservedScript {
   isModule: boolean;
   initiator?: ScriptInitiator;
   /**
-   * Tessera id of the script that inserted this one, when it can be resolved
+   * Scriptlock id of the script that inserted this one, when it can be resolved
    * from the initiator. Enables "child of GTM" grouping in reports.
    */
   loadedBy?: string;
@@ -178,7 +178,7 @@ export const SECURITY_HEADER_NAMES: readonly SecurityHeaderName[] = [
 export type SecurityHeaders = Partial<Record<SecurityHeaderName, string>>;
 
 // ---------------------------------------------------------------------------
-// Snapshot: the output of one `tessera scan`
+// Snapshot: the output of one `scriptlock scan`
 // ---------------------------------------------------------------------------
 
 export interface Vantage {
@@ -201,7 +201,7 @@ export interface BlockedInfo {
 
 export interface Snapshot {
   version: 1;
-  tool: { name: 'tessera'; version: string };
+  tool: { name: 'scriptlock'; version: string };
   profile: string;
   /** Start URL from the profile. */
   url: string;
@@ -222,7 +222,7 @@ export interface Snapshot {
 }
 
 // ---------------------------------------------------------------------------
-// Manifest: tessera.lock.yaml
+// Manifest: scriptlock.lock.yaml
 // ---------------------------------------------------------------------------
 
 /**
@@ -243,7 +243,7 @@ export type IntegrityPolicy = 'strict' | 'structural' | 'track' | 'url-only';
  * "integrity covered". Maps to the 6.4.3.b evidence row.
  */
 export type IntegrityMethod =
-  | 'hash-strict' // Tessera enforces the body hash on every run
+  | 'hash-strict' // Scriptlock enforces the body hash on every run
   | 'sri' // the page uses Subresource Integrity for this script
   | 'csp' // a Content Security Policy restricts the source
   | 'vendor-attested' // the vendor provides its own integrity assurance
@@ -266,7 +266,7 @@ export type ScriptCategory =
   | 'other';
 
 export interface ManifestScript {
-  /** Tessera identity (see ObservedScript.id). Must be unique within the manifest. */
+  /** Scriptlock identity (see ObservedScript.id). Must be unique within the manifest. */
   id: string;
   /**
    * Optional glob (picomatch) matched against ObservedScript.id. When set, an
@@ -291,7 +291,7 @@ export interface ManifestScript {
   approvedAt: string;
   /** Free-form notes. */
   notes?: string;
-  /** Last observed body change under `track`, maintained by `tessera approve --refresh`. */
+  /** Last observed body change under `track`, maintained by `scriptlock approve --refresh`. */
   lastSeenSha256?: string;
 }
 
@@ -391,7 +391,7 @@ export interface DiffResult {
 }
 
 // ---------------------------------------------------------------------------
-// Configuration: tessera.config.yaml
+// Configuration: scriptlock.config.yaml
 // ---------------------------------------------------------------------------
 
 export type WaitUntil = 'load' | 'domcontentloaded' | 'networkidle' | 'commit';
@@ -468,13 +468,13 @@ export interface ProfileConfig {
   settleMs: number;
   /** Number of runs unioned per scan. */
   runs: number;
-  /** Manifest path. Default: tessera.lock.yaml for profile "default", else tessera.<profile>.lock.yaml */
+  /** Manifest path. Default: scriptlock.lock.yaml for profile "default", else scriptlock.<profile>.lock.yaml */
   manifest?: string;
-  /** Persist snapshots and diffs under .tessera/history/<profile>/. */
+  /** Persist snapshots and diffs under .scriptlock/history/<profile>/. */
   history: boolean;
 }
 
-export interface TesseraConfig {
+export interface ScriptlockConfig {
   version: 1;
   browser: BrowserConfig;
   identity: IdentityConfig;
@@ -488,7 +488,7 @@ export interface TesseraConfig {
 // ---------------------------------------------------------------------------
 
 export interface ScanOptions {
-  config: TesseraConfig;
+  config: ScriptlockConfig;
   profile: string;
   /** Override runs from the profile. */
   runs?: number;
