@@ -148,10 +148,13 @@ jobs:
           case "$MANAGER" in
             npm) installed="$(npx scriptlock --version)" ;;
             pnpm) installed="$(pnpm exec scriptlock --version)" ;;
-            # Yarn Classic writes "yarn run v1.x", the command line and "Done in Ns."
-            # around the output; --silent drops all three. Yarn Berry prints only the
-            # command's own output, and accepts --silent as a no-op.
-            *) installed="$(yarn --silent scriptlock --version)" ;;
+            # Yarn Classic wraps a command with "yarn run v1.x", the command line and
+            # "Done in Ns."; --silent drops all three. Berry prints only the command's
+            # own output and rejects --silent as an unsupported option, so the two
+            # cannot share one line.
+            yarn-classic) installed="$(yarn --silent scriptlock --version)" ;;
+            yarn-berry) installed="$(yarn scriptlock --version)" ;;
+            *) echo "unknown manager $MANAGER" >&2; exit 1 ;;
           esac
           expected="$(node -p "require('${{ github.workspace }}/package.json').version")"
           test "$installed" = "$expected" || {
