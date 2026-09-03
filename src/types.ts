@@ -14,7 +14,7 @@
 export type ScriptKind =
   | 'external' // <script src> or dynamically inserted <script src>, any origin
   | 'inline' // <script> block in markup (classic or module)
-  | 'eval' // eval(), new Function(), setTimeout(string), anonymous code with a stack trace
+  | 'eval' // eval(), new Function(), setTimeout(string), javascript: URLs, any anonymous code compiled without a URL
   | 'blob' // blob: URL
   | 'data' // data: URL
   | 'wasm' // WebAssembly module
@@ -28,8 +28,10 @@ export type ScriptKind =
  *
  * - merchant: scripts on the page that embeds the payment form (parent page)
  *   and any same-origin frames. These gate the diff.
- * - tpsp: scripts inside a payment provider iframe. Collected as
- *   informational, tagged, never gated by default.
+ * - tpsp: scripts inside a payment provider iframe. Collected and tagged;
+ *   a merely new tpsp script is informational, but an approved tpsp entry
+ *   with a strict or structural policy is still gated on changed, moved and
+ *   spoofed like any other entry.
  * - threeds: scripts inside a 3-D Secure / ACS challenge frame. Exempt.
  * - embedded: scripts inside a cross-origin iframe that is neither a known
  *   payment provider nor 3DS (chat widgets, ads). Informational by default.
@@ -43,7 +45,14 @@ export type TargetType = 'page' | 'iframe' | 'worker' | 'service_worker';
 export interface FrameInfo {
   /** CDP frame id (stable within a run only). */
   id: string;
+  /**
+   * Normalised URL for child frames (DESIGN.md 4.1: hash-like path tokens
+   * become `[hash]`, cache busters are dropped), so a frame keeps its
+   * identity across a provider deploy. The main frame keeps its final URL.
+   */
   url: string;
+  /** URL exactly as observed, before normalisation. Absent for the main frame. */
+  rawUrl?: string;
   origin: string;
   isMain: boolean;
   parentId?: string;
@@ -96,15 +105,21 @@ export interface ObservedScript {
   frameUrl: string;
   frameOrigin: string;
   target: TargetType;
-  /** Hex SHA-256 over the UTF-8 bytes of the script source as returned by the engine. */
-  sha256: string;
+  /**
+   * Hex SHA-256 over the UTF-8 bytes of the script source as returned by the
+   * engine (over the raw bytecode for WebAssembly). Absent when the body was
+   * not captured: worker entries in version 1, for which only the entry URL is
+   * known.
+   */
+  sha256?: string;
   /**
    * Hex SHA-256 over the structurally normalised source (string literals,
    * numeric literals and whitespace masked). Used for `structural` integrity
-   * and for inline / eval identity. See DESIGN.md "Structural hash".
+   * and for inline / eval identity. See DESIGN.md "Structural hash". Absent
+   * when the body was not captured (see `sha256`).
    */
-  structuralHash: string;
-  /** Length of the source in bytes (UTF-8). */
+  structuralHash?: string;
+  /** Length of the source in bytes (UTF-8); 0 when the body was not captured. */
   size: number;
   isModule: boolean;
   initiator?: ScriptInitiator;
@@ -173,8 +188,6 @@ export interface Vantage {
   headless: boolean;
   /** Playwright channel or executable path used. */
   channel?: string;
-  /** Egress IP if the user opted in to detection, otherwise absent. */
-  egressIp?: string;
   /** Host name of the machine that ran the scan. */
   host?: string;
 }
@@ -370,6 +383,11 @@ export interface DiffResult {
   };
   /** Suggested process exit code: 0 clean, 1 findings at fail severity, 2 run error. */
   exitCode: 0 | 1 | 2;
+  /**
+   * Non-fatal notes produced while matching, e.g. an observed id that matches
+   * several manifest entries (the first in file order was used).
+   */
+  warnings?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -399,8 +417,19 @@ export interface BrowserConfig {
   viewport: { width: number; height: number };
   locale?: string;
   timezoneId?: string;
-  /** Extra HTTP headers, e.g. a scanner allowlist token. Values support ${ENV_VAR}. */
+  /**
+   * Extra HTTP headers, e.g. a scanner allowlist token. Values support
+   * ${ENV_VAR}. Sent only to the profile host, its subdomains and the hosts
+   * in `extraHeadersHosts`; requests to every other host (third-party script
+   * hosts, provider iframes) are sent without them.
+   */
   extraHeaders?: Record<string, string>;
+  /**
+   * Additional host globs that receive `extraHeaders` (same syntax as
+   * `scope.tpsp`; `*` means every host). The profile host and its subdomains
+   * always receive them.
+   */
+  extraHeadersHosts?: string[];
   /** Path to a Playwright storageState JSON for authenticated flows. */
   storageState?: string;
   /** Milliseconds; navigation and step timeout. */
@@ -473,4 +502,6 @@ export interface DiffOptions {
   snapshot: Snapshot;
   manifest: Manifest;
   mode: DiffMode;
+  /** Identity configuration used to normalise a claimed sourceURL for spoof detection. */
+  identity?: IdentityConfig;
 }

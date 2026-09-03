@@ -5,11 +5,14 @@ export default defineConfig({
   format: ['esm'],
   target: 'node20',
   platform: 'node',
-  dts: { entry: { index: 'src/index.ts' } },
   sourcemap: true,
   clean: true,
   splitting: false,
   banner: ({ format }) => (format === 'esm' ? { js: '#!/usr/bin/env node' } : {}),
-  // The banner must only be on the CLI entry; tsup applies it to all entries, so cli.ts
-  // is the only entry that matters for the shebang and index.ts tolerates it.
+  // The banner is applied to every entry; cli.ts is the one that needs the shebang
+  // and index.ts tolerates it.
+  //
+  // Declarations are emitted by `tsc --emitDeclarationOnly` in the build script,
+  // not by tsup's `dts` option: tsup bundles rollup-plugin-dts, which needs the
+  // TypeScript JS API, and TypeScript 7 (the native compiler) does not ship one.
 });

@@ -1,0 +1,79 @@
+# Deploy gate. Copy to .github/workflows/tessera-deploy-gate.yml in your repository.
+#
+# Runs `tessera diff --gate` against a preview deployment of the pull request and posts the
+# markdown report as a pull request comment. The job fails when a script in merchant scope
+# is new, moved, spoofed or changed under a strict or structural policy, or when a header
+# under the strict policy changed. Approve the change by editing tessera.lock.yaml in the
+# same pull request (`tessera approve <id> ...`), so the manifest change is reviewed with
+# the code change that caused it.
+name: Tessera deploy gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: tessera-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Gate scan against preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # Replace this step with whatever produces your preview URL: a deployment step's
+      # output, a deployment_status event, or a URL derived from the branch name.
+      - name: Resolve preview URL
+        id: preview
+        run: echo "url=https://pr-${{ github.event.pull_request.number }}.preview.shop.example.com/checkout" >> "$GITHUB_OUTPUT"
+
+      # Pin to a release tag or, better, a full commit SHA for supply chain hygiene.
+      - name: Tessera
+        id: tessera
+        uses: vladimirnizovtsev/tessera@v1
+        env:
+          # The "preview" profile in tessera.config.yaml has `url: ${PREVIEW_URL}` and
+          # `manifest: tessera.lock.yaml`, so the preview is checked against the same
+          # manifest as production.
+          PREVIEW_URL: ${{ steps.preview.outputs.url }}
+          TESSERA_SCANNER_TOKEN: ${{ secrets.TESSERA_SCANNER_TOKEN }}
+        with:
+          profile: preview
+          mode: gate
+
+      - name: Comment on the pull request
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          SUMMARY_FILE: ${{ steps.tessera.outputs.summary-file }}
+          EXIT_CODE: ${{ steps.tessera.outputs.exit-code }}
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- tessera-deploy-gate -->';
+            const file = process.env.SUMMARY_FILE || '.tessera/diff.preview.md';
+            let report;
+            try {
+              report = fs.readFileSync(file, 'utf8');
+            } catch {
+              report = 'Tessera did not produce a report. Check the job log.';
+            }
+            const code = process.env.EXIT_CODE || 'unknown';
+            const status = code === '0' ? 'clean' : code === '1' ? 'findings' : 'run error';
+            const body = `${marker}\n## Tessera deploy gate: ${status} (exit code ${code})\n\n${report}`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+            const existing = comments.find((c) => c.body && c.body.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }

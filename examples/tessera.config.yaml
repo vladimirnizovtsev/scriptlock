@@ -1,0 +1,93 @@
+# Example Tessera configuration. Copy to tessera.config.yaml in the root of your repository
+# and edit the URLs. Every ${VAR} is replaced from the environment when the file is loaded;
+# a missing variable is a configuration error that names the variable, so define every
+# variable referenced here in every environment that runs Tessera, even for profiles that
+# are not being scanned in that environment.
+version: 1
+
+browser:
+  # Playwright channel: "chromium" (the Playwright-managed build installed with
+  # `npx playwright-core install chromium`), "chrome" or "msedge". Or set executablePath
+  # to a Chromium-based binary; it overrides channel.
+  channel: chromium
+  headless: true
+  viewport: { width: 1366, height: 900 }
+  # Navigation and step timeout in milliseconds.
+  timeoutMs: 30000
+  # Optional. Leave the user agent as the browser reports it unless you have a reason.
+  # userAgent: ""
+  # locale: en-GB
+  # timezoneId: Europe/Berlin
+  # Match this header in a skip or allow rule in your bot management (Cloudflare Super Bot
+  # Fight Mode skip rule, Akamai custom bot category, DataDome custom rule). Tessera ships no
+  # stealth patches. The header is sent only to the profile host and its subdomains; it is
+  # stripped from requests to third-party script hosts and provider iframes.
+  extraHeaders:
+    X-Scanner-Token: ${TESSERA_SCANNER_TOKEN}
+  # Extra host globs that also receive extraHeaders (use "*" for every host). Keep the token
+  # low-privilege regardless.
+  # extraHeadersHosts: []
+  # Playwright storageState JSON for authenticated flows (produced by your own login
+  # script). Never commit it.
+  # storageState: .tessera/storage-state.json
+
+identity:
+  # Query parameters removed before identity is computed, in addition to the built-in
+  # cache busters (v, ver, version, cb, _, t, ts, timestamp, rnd, rand, random, nocache,
+  # cache, h, hash, bust, _t, _v).
+  stripQuery: []
+  # Query parameters kept even if they look like cache busters.
+  keepQuery: []
+  # Replace hash-like path tokens with [hash]: /assets/app.3f9c2a1b.js -> /assets/app.[hash].js
+  collapseHashes: true
+
+scope:
+  # Host globs of payment provider frames, added to the built-ins (Stripe, Adyen, PayPal,
+  # Braintree, Checkout.com, Klarna, Mollie, Square, Google Pay, Apple Pay, Authorize.net,
+  # Worldpay, Nuvei, 2Checkout, Paddle, Recurly, Chargebee, GoCardless).
+  tpsp:
+    - "*.payments.example-psp.com"
+  # Host globs of 3-D Secure / ACS frames, added to the built-ins.
+  threeds: []
+
+# Integrity policy applied by `tessera approve` when --integrity is not given.
+integrity:
+  firstParty: strict     # host equals the main-frame host or a subdomain of it
+  thirdParty: track      # everything else; body changes are recorded, never fail
+  inline: structural     # literals are masked, code shape is enforced
+  eval: structural
+
+profiles:
+  # Production checkout. Manifest: tessera.lock.yaml. Stops at the rendered payment form.
+  default:
+    url: https://shop.example.com/
+    steps:
+      - goto: /product/42                  # relative to url
+      - click: "text=Add to cart"
+      - goto: /checkout
+      - fill: { selector: "#email", value: "tessera-scan@example.com" }
+      - waitFor: "#payment-element iframe"
+      - wait: 2000
+    wait: networkidle                      # load | domcontentloaded | networkidle | commit
+    settleMs: 3000                         # idle time after the last step, to catch late tags
+    runs: 2                                # scans unioned per run; absence must hold in all runs
+    history: true                          # keep snapshots and diffs under .tessera/history/default/
+
+  # Preview deployment checked in the deploy gate against the production manifest.
+  # PREVIEW_URL is set by the workflow (see examples/workflows/tessera-deploy-gate.yml).
+  preview:
+    url: ${PREVIEW_URL}
+    steps: ./examples/checkout-flow.ts     # module escape hatch; .ts needs tsx installed
+    wait: networkidle
+    settleMs: 3000
+    runs: 1
+    manifest: tessera.lock.yaml            # share the default manifest
+    history: false
+
+  # A second page with its own manifest: tessera.account.lock.yaml.
+  account:
+    url: https://shop.example.com/account/payment-methods
+    wait: networkidle
+    settleMs: 2000
+    runs: 1
+    history: false

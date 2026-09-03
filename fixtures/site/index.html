@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tessera fixture shop</title>
+<script>
+  // Inline classic script (static markup).
+  window.__fixture = { inlineClassic: true, events: [] };
+</script>
+<script type="module">
+  // Inline module script (static markup).
+  window.__fixture.inlineModule = true;
+</script>
+<script>self.__hydration = self.__hydration || []; self.__hydration.push([1, "{{NONCE}}", 42]);</script>
+<script src="/app.{{APP_HASH}}.js"></script>
+<script src="/vendor.js?v={{VENDOR_VERSION}}"></script>
+<script src="/spoof.js"></script>
+{{EXTRA_SCRIPTS}}
+</head>
+<body>
+<h1>Fixture shop</h1>
+<form id="checkout">
+  <input id="email" name="email" type="email">
+  <select id="country"><option value="de">DE</option><option value="fr">FR</option></select>
+  <button id="pay" type="button" onclick="window.__fixture.events.push('pay')">Add to cart</button>
+</form>
+<iframe id="same" title="same-origin frame" src="/frame-same.html"></iframe>
+<iframe id="cross" title="cross-origin frame" src="{{CROSS_ORIGIN}}/frame-cross.html"></iframe>
+<script>
+  (function () {
+    // Dynamically inserted external script (initiator: script).
+    var s = document.createElement('script');
+    s.src = '/dynamic.js';
+    document.head.appendChild(s);
+    // eval and new Function.
+    eval('window.__fixture.evalRan = 1 + 1;');
+    var fn = new Function('a', 'b', 'return a + b;');
+    window.__fixture.fnResult = fn(2, 3);
+    // blob: script.
+    var blob = new Blob(['window.__fixture.blobRan = true;'], { type: 'text/javascript' });
+    var b = document.createElement('script');
+    b.src = URL.createObjectURL(blob);
+    document.head.appendChild(b);
+    // Late tag inserted after 1500 ms.
+    setTimeout(function () {
+      var l = document.createElement('script');
+      l.src = '/late.js';
+      document.head.appendChild(l);
+    }, 1500);
+    // Optional dedicated worker.
+    if (location.search.indexOf('worker=1') !== -1) {
+      window.__fixture.worker = new Worker('/worker.js');
+    }
+  })();
+</script>
+{{VECTORS}}
+</body>
+</html>

@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cross-origin frame</title>
+<script>window.__crossFrame = { inline: true, fields: ['number', 'expiry', 'cvc'] };</script>
+<script src="/frame-cross.js"></script>
+{{FRAME_EXTRA_SCRIPTS}}
+</head>
+<body><p>Cross-origin frame content (payment field placeholder).</p><input id="card-number" name="card-number"></body>
+</html>
