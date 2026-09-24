@@ -62,7 +62,7 @@
     "picocolors": "^1.1.1",
     "picomatch": "^4.0.7",
     "playwright-core": "^1.62.1",
-    "third-party-web": "^0.29.2",
+    "third-party-web": "^0.30.0",
     "yaml": "^2.9.0",
     "zod": "^4.5.4"
   },
